@@ -18,32 +18,13 @@ class TranscriptSegment(BaseModel):
             self.dur = self.end - self.start
 
 
-class VideoMetadata(BaseModel):
-    title: str = None
-    author: str = None
-    view_count: str = None
-    description: str = None
-    publish_date: str = None
-    channel_id: str = None
-    duration: str = None
-    like_count: str = None
-    tags: str = None
-
-    @property
-    def clean_title(self) -> str:
-        return re.sub(r'[^a-zA-Z0-9 ]', '', self.title).replace(' ', '_').lower()
-
-
 
 class VideoTranscript(BaseModel):
     video_id: str = ""
-    metadata: VideoMetadata
     transcript_segments: list[TranscriptSegment]
     full_transcript: str = ""
 
-    @property
-    def key_name(self) -> str:
-        return f"{self.metadata.clean_title}_{self.video_id}"
+
 
     @classmethod
     def from_openai_transcript(cls, transcript_data: TranscriptionVerbose) -> 'VideoTranscript':
