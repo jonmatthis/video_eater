@@ -4,14 +4,14 @@ import yaml
 from pathlib import Path
 from typing import List, Tuple
 
-from .base_processor import BaseProcessor
-from ..cache_stuff import CACHE_DIRS
-from ..yt_models import VideoTranscript, ProcessedTranscript, TranscriptEntry
-from ..yt_prompts import CLEANUP_TRANSCRIPT_SYSTEM_PROMPT
+from video_eater.core.transcribe_audio.transcript_models import ProcessedTranscript, VideoTranscript, TranscriptSegment
+from video_eater.core.ai_processors.base_processor import  BaseAIProcessor
+from video_eater.old.cache_stuff import CACHE_DIRS
+from video_eater.old.yt_prompts import CLEANUP_TRANSCRIPT_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
-class YoutubeTranscriptCleaner(BaseProcessor):
+class TranscriptCleaner(BaseAIProcessor):
     """Responsible for cleaning raw transcripts."""
 
     async def process_all_transcripts(self) -> List[ProcessedTranscript]:
@@ -62,29 +62,29 @@ class YoutubeTranscriptCleaner(BaseProcessor):
         logger.info(f"Cleaning transcript for {video_data.metadata.title}")
 
         tasks = [
-            self._clean_chunk(i, chunk, video_data.metadata.title, len(video_data.transcript_chunks))
-            for i, chunk in enumerate(video_data.transcript_chunks)
+            self._clean_chunk(i, chunk, video_data.metadata.title, len(video_data.transcript_segments))
+            for i, chunk in enumerate(video_data.transcript_segments)
         ]
         chunks = await asyncio.gather(*tasks)
 
         return ProcessedTranscript(
             video_id=video_data.video_id,
             title=video_data.metadata.title,
-            transcript_chunks=chunks,
+            transcript_segments=chunks,
             full_transcript=" ".join([c.text for c in chunks])
         )
 
     async def _clean_chunk(self,
                            chunk_number: int,
-                           chunk: TranscriptEntry,
+                           chunk: TranscriptSegment,
                            title: str,
-                           total_chunks: int) -> TranscriptEntry:
+                           total_chunks: int) -> TranscriptSegment:
         """Clean an individual transcript chunk."""
         logger.debug(
             f"Cleaning chunk {chunk_number + 1}/{total_chunks} for {title}")
         cleaned_chunk = await self.make_openai_json_mode_ai_request(
             system_prompt=CLEANUP_TRANSCRIPT_SYSTEM_PROMPT,
             input_data=chunk.model_dump(),
-            output_model=TranscriptEntry
+            output_model=TranscriptSegment
         )
         return cleaned_chunk

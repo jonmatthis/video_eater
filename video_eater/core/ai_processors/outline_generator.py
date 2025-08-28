@@ -62,7 +62,7 @@ class OutlineGenerator(BaseProcessor):
 
         # Create tasks for all chunk processing
         tasks = []
-        for i, chunk in enumerate(transcript.transcript_chunks):
+        for i, chunk in enumerate(transcript.transcript_segments):
             tasks.append(self._process_chunk(
                 transcript=transcript,
                 chunk=chunk,
@@ -83,12 +83,12 @@ class OutlineGenerator(BaseProcessor):
         formatted_prompt = OUTLINE_SYSTEM_PROMPT.format(
             LECTURE_TITLE=transcript.title,
             CHUNK_NUMBER=chunk_index + 1,
-            TOTAL_CHUNK_COUNT=len(transcript.transcript_chunks),
+            TOTAL_CHUNK_COUNT=len(transcript.transcript_segments),
             PREVIOUS_OUTLINE=previous_outline,
             CURRENT_CHUNK=chunk.text
         )
 
-        logger.debug(f"Processing outline chunk {chunk_index + 1}/{len(transcript.transcript_chunks)} for {transcript.title}")
+        logger.debug(f"Processing outline chunk {chunk_index + 1}/{len(transcript.transcript_segments)} for {transcript.title}")
 
         return await self.make_openai_text_request(
             system_prompt=formatted_prompt

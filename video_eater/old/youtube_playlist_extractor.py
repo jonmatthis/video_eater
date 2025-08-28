@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from youtube_transcript_api import YouTubeTranscriptApi
 
 from .cache_stuff import CACHE_DIRS
-from .yt_models import VideoTranscript, TranscriptEntry, YoutubeVideoMetadata
+from video_eater.core.transcribe_audio.transcript_models import VideoTranscript, TranscriptSegment, YoutubeVideoMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +85,7 @@ class YouTubePlaylistExtractor(BaseModel):
             video_transcript = VideoTranscript(
                 video_id=video_id,
                 metadata=metadata,
-                transcript_chunks=chunked_transcript,
+                transcript_segments=chunked_transcript,
                 full_transcript=full_transcript
             )
 
@@ -143,7 +143,7 @@ class YouTubePlaylistExtractor(BaseModel):
             return None
 
     @staticmethod
-    def _get_transcript(video_id: str) -> list[TranscriptEntry]:
+    def _get_transcript(video_id: str) -> list[TranscriptSegment]:
         """Get transcript for a YouTube video using youtube-transcript-api."""
         try:
             transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
@@ -158,7 +158,7 @@ class YouTubePlaylistExtractor(BaseModel):
             transcript_data = transcript.fetch()
 
             return [
-                TranscriptEntry(
+                TranscriptSegment(
                     text=item['text'],
                     start=float(item['start']),
                     dur=float(item['duration'])
@@ -169,7 +169,7 @@ class YouTubePlaylistExtractor(BaseModel):
             logger.error(f"Transcript error for {video_id}: {str(e)}")
             return []
 
-    def _chunk_transcript(self, entries: list[TranscriptEntry]) -> list[TranscriptEntry]:
+    def _chunk_transcript(self, entries: list[TranscriptSegment]) -> list[TranscriptSegment]:
         """Chunk transcript into specified time intervals."""
         if not entries:
             return []
@@ -187,7 +187,7 @@ class YouTubePlaylistExtractor(BaseModel):
                 # Save current chunk
                 if current_chunk:
                     chunk_text = " ".join([e.text for e in current_chunk])
-                    chunks.append(TranscriptEntry(
+                    chunks.append(TranscriptSegment(
                         text=chunk_text,
                         start=chunk_start,
                         dur=self.chunk_interval
@@ -202,7 +202,7 @@ class YouTubePlaylistExtractor(BaseModel):
         # Add the final chunk
         if current_chunk:
             chunk_text = " ".join([e.text for e in current_chunk])
-            chunks.append(TranscriptEntry(
+            chunks.append(TranscriptSegment(
                 text=chunk_text,
                 start=chunk_start,
                 dur=self.chunk_interval

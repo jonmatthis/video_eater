@@ -5,9 +5,9 @@ from typing import Dict, List
 
 from dotenv import load_dotenv
 
-from .ai_processors.youtube_transcript_cleaner import YoutubeTranscriptCleaner
-from .ai_processors.outline_generator import OutlineGenerator
-from .ai_processors.theme_synthesizer import ThemeSynthesizer
+from video_eater.core.ai_processors.outline_generator import OutlineGenerator
+from video_eater.core.ai_processors.theme_synthesizer import ThemeSynthesizer
+from video_eater.core.ai_processors.youtube_transcript_cleaner import TranscriptCleaner
 
 logger = logging.getLogger(__name__)
 load_dotenv()
@@ -41,7 +41,7 @@ class AITranscriptProcessor:
         }
 
         # Initialize processors
-        self.cleaner = YoutubeTranscriptCleaner(force_refresh=force_refresh, model=self.models['cleanup'])
+        self.cleaner = TranscriptCleaner(force_refresh=force_refresh, model=self.models['cleanup'])
         self.outline_generator = OutlineGenerator(force_refresh=force_refresh, model=self.models['outline'])
         self.theme_synthesizer = ThemeSynthesizer(
             force_refresh=force_refresh,
