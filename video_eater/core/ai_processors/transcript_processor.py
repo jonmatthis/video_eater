@@ -6,6 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from datetime import timedelta
 import re
+from typing import Optional, Dict, List, Tuple
+from collections import defaultdict
+import time
 
 from video_eater.core.ai_processors.base_processor import BaseAIProcessor
 from pydantic import BaseModel, Field
@@ -13,19 +16,20 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger(__name__)
 
 
-# Pydantic models for structured outputs
+# Pydantic models remain the same
 class ChapterHeading(BaseModel):
     timestamp_seconds: float = Field(description="Start time in seconds")
     title: str = Field(description="Chapter title")
-    description: str|None = Field(description="Brief description of what happens in this chapter")
+    description: str | None = Field(description="Brief description of what happens in this chapter")
 
 
 class ChunkAnalysis(BaseModel):
     summary: str = Field(description="Comprehensive summary of the chunk content")
     key_topics: list[str] = Field(description="list of main topics discussed")
-    topic_outline: dict[str, list[str]|dict[str,object]] = Field(description="Hierarchical outline of topics and subtopics")
+    topic_outline: dict[str, list[str] | dict[str, object]] = Field(
+        description="Hierarchical outline of topics and subtopics")
     chapters: list[ChapterHeading] = Field(description="Timestamped chapter headings")
-    notable_quotes: list[str]|None = Field(default=None, description="Important or interesting quotes")
+    notable_quotes: list[str] | None = Field(default=None, description="Important or interesting quotes")
 
 
 class FullVideoAnalysis(BaseModel):
@@ -35,15 +39,28 @@ class FullVideoAnalysis(BaseModel):
     complete_outline: dict[str, list[str]] = Field(description="Complete hierarchical topic outline")
     chapters: list[ChapterHeading] = Field(description="Full video chapter list with adjusted timestamps")
     key_takeaways: list[str] = Field(description="Main insights and conclusions")
-    notable_quotes: list[str]|None = Field(default=None, description="Most impactful quotes from the video")
+    notable_quotes: list[str] | None = Field(default=None, description="Most impactful quotes from the video")
 
 
 class TranscriptProcessor:
     """Process transcribed chunks to generate summaries, outlines, and chapters."""
 
-    def __init__(self, model: str = "deepseek-chat", use_async: bool = True):
+    def __init__(self,
+                 model: str = "deepseek-chat",
+                 use_async: bool = True,
+                 max_concurrent_chunks: int = 50,  # Control API rate limiting
+                 batch_size: int = 10):  # Process chunks in batches
         self.processor = BaseAIProcessor(model=model, use_async=use_async)
         self.model = model
+        self.max_concurrent_chunks = max_concurrent_chunks
+        self.batch_size = batch_size
+        self._semaphore = asyncio.Semaphore(max_concurrent_chunks)
+        self.processing_stats = {
+            'chunks_processed': 0,
+            'chunks_cached': 0,
+            'processing_time': 0,
+            'errors': []
+        }
 
     @staticmethod
     def format_timestamp(seconds: float) -> str:
@@ -62,13 +79,40 @@ class TranscriptProcessor:
     @staticmethod
     def parse_chunk_filename(filename: str) -> float:
         """Extract the start time in seconds from chunk filename."""
-        # Pattern: chunk_XXX_HHh-MMm-SSsec
         pattern = r"chunk_\d+_(\d+)h-(\d+)m-(\d+)sec"
         match = re.search(pattern, filename)
         if match:
             hours, minutes, seconds = map(int, match.groups())
             return hours * 3600 + minutes * 60 + seconds
         return 0.0
+
+    async def analyze_chunk_with_semaphore(self,
+                                           transcript_text: str,
+                                           chunk_start_seconds: float,
+                                           chunk_index: int,
+                                           chunk_name: str) -> Tuple[int, ChunkAnalysis, str]:
+        """Analyze a single chunk with rate limiting via semaphore."""
+        async with self._semaphore:
+            try:
+                start_time = time.time()
+                print(f"  📝 Processing chunk {chunk_index + 1}: {chunk_name}")
+
+                analysis = await self.analyze_chunk(
+                    transcript_text=transcript_text,
+                    chunk_start_seconds=chunk_start_seconds,
+                    chunk_index=chunk_index
+                )
+
+                elapsed = time.time() - start_time
+                print(f"  ✅ Completed chunk {chunk_index + 1} in {elapsed:.1f}s")
+
+                return chunk_index, analysis, None
+
+            except Exception as e:
+                error_msg = f"Error analyzing chunk {chunk_index}: {str(e)}"
+                print(f"  ❌ Failed chunk {chunk_index + 1}: {e}")
+                self.processing_stats['errors'].append(error_msg)
+                return chunk_index, None, error_msg
 
     async def analyze_chunk(self,
                             transcript_text: str,
@@ -110,9 +154,162 @@ class TranscriptProcessor:
             print(f"Error analyzing chunk {chunk_index}: {e}")
             raise
 
+    async def _return_cached(self, idx: int, analysis: ChunkAnalysis):
+        """Helper to return cached analysis in async context."""
+        return idx, analysis, None
+
+    async def process_transcript_batch(self,
+                                       batch: List[Tuple[int, Path, float]],
+                                       output_folder: Path) -> List[ChunkAnalysis]:
+        """Process a batch of transcript files in parallel."""
+        tasks = []
+
+        for batch_idx, (global_idx, transcript_file, chunk_start) in enumerate(batch):
+            # Check if analysis already exists
+            analysis_file = output_folder / f"{transcript_file.stem}.analysis.yaml"
+
+            if analysis_file.exists():
+                print(f"  📂 Using cached analysis for chunk {global_idx + 1}")
+                self.processing_stats['chunks_cached'] += 1
+                with open(analysis_file, 'r', encoding='utf-8') as f:
+                    chunk_analysis = ChunkAnalysis(**yaml.safe_load(f))
+                    tasks.append(asyncio.create_task(
+                        self._return_cached(global_idx, chunk_analysis)
+                    ))
+            else:
+                # Load transcript
+                with open(transcript_file, 'r', encoding='utf-8') as f:
+                    transcript_data = json.load(f)
+
+                # Extract text
+                if isinstance(transcript_data, dict):
+                    transcript_text = transcript_data.get('text', '')
+                else:
+                    transcript_text = str(transcript_data)
+
+                # Create analysis task
+                task = asyncio.create_task(
+                    self.analyze_chunk_with_semaphore(
+                        transcript_text=transcript_text,
+                        chunk_start_seconds=chunk_start,
+                        chunk_index=global_idx,
+                        chunk_name=transcript_file.name
+                    )
+                )
+                tasks.append(task)
+
+        # Wait for all tasks in this batch to complete
+        results = await asyncio.gather(*tasks)
+
+        # Process results and save analyses
+        chunk_analyses = []
+        for idx, analysis, error in results:
+            if error:
+                continue  # Skip failed chunks
+
+            chunk_analyses.append((idx, analysis))
+
+            # Save successful analysis if it's new
+            # Find the correct batch item for this global index
+            batch_item = None
+            for item in batch:
+                if item[0] == idx:  # item[0] is the global index
+                    batch_item = item
+                    break
+
+            if batch_item:
+                transcript_file = batch_item[1]
+                analysis_file = output_folder / f"{transcript_file.stem}.analysis.yaml"
+
+                if not analysis_file.exists():
+                    with open(analysis_file, 'w', encoding='utf-8') as f:
+                        yaml.dump(analysis.model_dump(), f,
+                                  default_flow_style=False,
+                                  sort_keys=False,
+                                  allow_unicode=True)
+                    self.processing_stats['chunks_processed'] += 1
+
+        # Sort by index to maintain order
+        chunk_analyses.sort(key=lambda x: x[0])
+        return [analysis for _, analysis in chunk_analyses]
+
+    async def process_transcript_folder(self,
+                                        transcript_folder: Path,
+                                        output_folder: Path | None = None) -> FullVideoAnalysis:
+        """Process all transcript chunks in a folder with parallel processing."""
+
+        start_time = time.time()
+
+        # Set up output folder
+        if output_folder is None:
+            output_folder = transcript_folder.parent / "analysis"
+        output_folder.mkdir(parents=True, exist_ok=True)
+
+        # Find all transcript JSON files
+        transcript_files = sorted(transcript_folder.glob("*.transcript.json"))
+        if not transcript_files:
+            raise ValueError(f"No transcript files found in {transcript_folder}")
+
+        print(f"\n🎬 Processing {len(transcript_files)} transcript files")
+        print(f"⚡ Max concurrent processing: {self.max_concurrent_chunks}")
+        print(f"📦 Batch size: {self.batch_size}\n")
+
+        # Prepare file data with metadata
+        file_data = []
+        for idx, transcript_file in enumerate(transcript_files):
+            chunk_start = self.parse_chunk_filename(transcript_file.name)
+            file_data.append((idx, transcript_file, chunk_start))
+
+        # Process in batches
+        all_chunk_analyses = []
+        total_batches = (len(file_data) + self.batch_size - 1) // self.batch_size
+
+        for batch_idx in range(0, len(file_data), self.batch_size):
+            batch = file_data[batch_idx:batch_idx + self.batch_size]
+            current_batch_num = batch_idx // self.batch_size + 1
+
+            print(f"📋 Processing batch {current_batch_num}/{total_batches} " +
+                  f"(chunks {batch[0][0] + 1}-{batch[-1][0] + 1})")
+
+            batch_analyses = await self.process_transcript_batch(batch, output_folder)
+            all_chunk_analyses.extend(batch_analyses)
+
+            print(f"✅ Batch {current_batch_num} complete\n")
+
+        # Print processing statistics
+        elapsed = time.time() - start_time
+        print(f"\n📊 Processing Statistics:")
+        print(f"  • Total time: {elapsed:.1f}s")
+        print(f"  • Chunks processed: {self.processing_stats['chunks_processed']}")
+        print(f"  • Chunks cached: {self.processing_stats['chunks_cached']}")
+        print(f"  • Average time per chunk: {elapsed / len(transcript_files):.1f}s")
+
+        if self.processing_stats['errors']:
+            print(f"  • Errors encountered: {len(self.processing_stats['errors'])}")
+            for error in self.processing_stats['errors'][:5]:  # Show first 5 errors
+                print(f"    - {error}")
+
+        # Combine all analyses
+        print("\n🔄 Combining all chunk analyses...")
+        full_analysis = await self.combine_analyses(all_chunk_analyses)
+
+        # Save combined analysis as YAML
+        combined_file = output_folder / "full_video_analysis.yaml"
+        with open(combined_file, 'w', encoding='utf-8') as f:
+            yaml.dump(full_analysis.model_dump(), f,
+                      default_flow_style=False,
+                      sort_keys=False,
+                      allow_unicode=True)
+        print(f"💾 Saved combined analysis to {combined_file}")
+
+        # Generate formatted outputs
+        await self.generate_formatted_outputs(full_analysis, output_folder)
+
+        return full_analysis
+
     async def combine_analyses(self,
                                chunk_analyses: list[ChunkAnalysis],
-                               video_title: str|None = None) -> FullVideoAnalysis:
+                               video_title: str | None = None) -> FullVideoAnalysis:
         """Combine individual chunk analyses into a complete video analysis."""
 
         # Prepare data for combination
@@ -132,11 +329,12 @@ class TranscriptProcessor:
             for topic, subtopics in analysis.topic_outline.items():
                 if topic in combined_outline:
                     # Merge subtopics, avoiding duplicates
-                    combined_outline[topic].extend(
-                        [st for st in subtopics if st not in combined_outline[topic]]
-                    )
+                    if isinstance(subtopics, list):
+                        combined_outline[topic].extend(
+                            [st for st in subtopics if st not in combined_outline[topic]]
+                        )
                 else:
-                    combined_outline[topic] = subtopics
+                    combined_outline[topic] = subtopics if isinstance(subtopics, list) else []
 
         # Create a context string for the AI
         context = {
@@ -183,84 +381,6 @@ class TranscriptProcessor:
             print(f"Error combining analyses: {e}")
             raise
 
-    async def process_transcript_folder(self,
-                                        transcript_folder: Path,
-                                        output_folder: Path|None = None) -> FullVideoAnalysis:
-        """Process all transcript chunks in a folder."""
-
-        # Set up output folder
-        if output_folder is None:
-            output_folder = transcript_folder.parent / "analysis"
-        output_folder.mkdir(parents=True, exist_ok=True)
-
-        # Find all transcript JSON files
-        transcript_files = sorted(transcript_folder.glob("*.transcript.json"))
-        if not transcript_files:
-            raise ValueError(f"No transcript files found in {transcript_folder}")
-
-        print(f"Found {len(transcript_files)} transcript files to process")
-
-        # Process each chunk
-        chunk_analyses = []
-        for idx, transcript_file in enumerate(transcript_files):
-            print(f"Processing chunk {idx + 1}/{len(transcript_files)}: {transcript_file.name}")
-
-            # Check if analysis already exists (now as YAML)
-            analysis_file = output_folder / f"{transcript_file.stem}.analysis.yaml"
-
-            if analysis_file.exists():
-                print(f"Loading existing analysis from {analysis_file}")
-                with open(analysis_file, 'r', encoding='utf-8') as f:
-                    chunk_analysis = ChunkAnalysis(**yaml.safe_load(f))
-            else:
-                # Load transcript (still JSON from Whisper API)
-                with open(transcript_file, 'r', encoding='utf-8') as f:
-                    transcript_data = json.load(f)
-
-                # Extract text (handling different possible structures)
-                if isinstance(transcript_data, dict):
-                    transcript_text = transcript_data.get('text', '')
-                else:
-                    transcript_text = str(transcript_data)
-
-                # Get chunk start time from filename
-                chunk_start = self.parse_chunk_filename(transcript_file.name)
-
-                # Analyze chunk
-                chunk_analysis = await self.analyze_chunk(
-                    transcript_text=transcript_text,
-                    chunk_start_seconds=chunk_start,
-                    chunk_index=idx
-                )
-
-                # Save chunk analysis as YAML
-                with open(analysis_file, 'w', encoding='utf-8') as f:
-                    yaml.dump(chunk_analysis.model_dump(), f,
-                              default_flow_style=False,
-                              sort_keys=False,
-                              allow_unicode=True)
-                print(f"Saved chunk analysis to {analysis_file}")
-
-            chunk_analyses.append(chunk_analysis)
-
-        # Combine all analyses
-        print("Combining all chunk analyses...")
-        full_analysis = await self.combine_analyses(chunk_analyses)
-
-        # Save combined analysis as YAML
-        combined_file = output_folder / "full_video_analysis.yaml"
-        with open(combined_file, 'w', encoding='utf-8') as f:
-            yaml.dump(full_analysis.model_dump(), f,
-                      default_flow_style=False,
-                      sort_keys=False,
-                      allow_unicode=True)
-        print(f"Saved combined analysis to {combined_file}")
-
-        # Generate formatted outputs
-        await self.generate_formatted_outputs(full_analysis, output_folder)
-
-        return full_analysis
-
     async def generate_formatted_outputs(self,
                                          analysis: FullVideoAnalysis,
                                          output_folder: Path):
@@ -292,7 +412,7 @@ class TranscriptProcessor:
                 for quote in analysis.notable_quotes:
                     f.write(f'"{quote}"\n\n')
 
-        print(f"Generated YouTube description at {youtube_file}")
+        print(f"📄 Generated YouTube description at {youtube_file}")
 
         # Detailed markdown report
         markdown_file = output_folder / "video_analysis_report.md"
@@ -313,8 +433,9 @@ class TranscriptProcessor:
             f.write("## Complete Topic Outline\n\n")
             for topic, subtopics in analysis.complete_outline.items():
                 f.write(f"### {topic}\n")
-                for subtopic in subtopics:
-                    f.write(f"- {subtopic}\n")
+                if isinstance(subtopics, list):
+                    for subtopic in subtopics:
+                        f.write(f"- {subtopic}\n")
                 f.write("\n")
 
             f.write("## Video Chapters\n\n")
@@ -334,18 +455,25 @@ class TranscriptProcessor:
                 for quote in analysis.notable_quotes:
                     f.write(f"> \"{quote}\"\n\n")
 
-        print(f"Generated markdown report at {markdown_file}")
+        print(f"📄 Generated markdown report at {markdown_file}")
 
 
-# Example usage
+# Example usage with progress tracking
 async def main():
     # Example: Process a folder of transcripts
-    transcript_folder = Path(r"\\jon-nas\jon-nas\videos\livestream_videos\2025-08-14-JSM-Livestream-Skellycam\chunk_transcripts")
+    transcript_folder = Path(
+        r"\\jon-nas\jon-nas\videos\livestream_videos\2025-08-14-JSM-Livestream-Skellycam\chunk_transcripts")
 
-    processor = TranscriptProcessor()
+    # Create processor with custom concurrency settings
+    processor = TranscriptProcessor(
+        model="deepseek-chat",
+        max_concurrent_chunks=5,  # Process up to 5 chunks simultaneously
+        batch_size=10  # Process in batches of 10
+    )
+
     full_analysis = await processor.process_transcript_folder(transcript_folder)
 
-    print("Analysis complete!")
+    print("\n🎉 Analysis complete!")
     print(f"Executive Summary: {full_analysis.executive_summary}")
     print(f"Found {len(full_analysis.chapters)} chapters")
     print(f"Main topics: {', '.join(full_analysis.main_topics[:5])}")
