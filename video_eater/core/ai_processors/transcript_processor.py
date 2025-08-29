@@ -20,8 +20,10 @@ class ChapterHeading(BaseModel):
     title: str = Field(description="Chapter title")
     description: str = Field(description="Brief description of what happens in this chapter")
 
+class PromptModel(BaseModel):
+    pass
 
-class PullQuote(BaseModel):
+class PullQuote(PromptModel):
     timestamp_seconds: float = Field(description="Start time in seconds when the quote was spoken")
     pull_quotes: list[str] = Field(
         description="Most impactful, interesting, or otherwise notable pull quotes from the video")
@@ -30,18 +32,18 @@ class PullQuote(BaseModel):
     context_around_quote: str = Field(description="Brief context around the quote to explain its significance")
 
 
-class SubTopicOutlineItem(BaseModel):
+class SubTopicOutlineItem(PromptModel):
     subtopic: str = Field(description="Subtopic under a main topic")
     details: list[str] = Field(description="List of details or points under this subtopic")
 
 
-class TopicOutlineItem(BaseModel):
+class TopicOutlineItem(PromptModel):
     topic: str = Field(description="Main topic")
     topic_overview: str = Field(description="Brief overview of the main topic")
     subtopics: list[SubTopicOutlineItem] = Field(description="List of subtopics under this main topic")
 
 
-class ChunkAnalysis(BaseModel):
+class ChunkAnalysis(PromptModel):
     summary: str = Field(description="Comprehensive summary of the chunk content")
     key_topics: list[str] = Field(description="list of main topics discussed")
     chunk_outline: list[TopicOutlineItem] = Field(description="Hierarchical outline of topics and subtopics")
@@ -50,7 +52,7 @@ class ChunkAnalysis(BaseModel):
         description="Most impactful, interesting, or otherwise notable pull quotes from the video")
 
 
-class FullVideoAnalysis(BaseModel):
+class FullVideoAnalysis(PromptModel):
     executive_summary: str = Field(description="High-level summary of the entire video")
     detailed_summary: str = Field(description="Comprehensive summary with key points")
     main_themes: list[str] = Field(description="Primary themes covered across the video")

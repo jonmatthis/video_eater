@@ -1,14 +1,15 @@
-import sys
 import asyncio
-from pathlib import Path
+import sys
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Optional, List, Tuple
 
 # Add the parent directory to sys.path to make the package importable
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 import logging
+
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
 logging.getLogger("numba").setLevel(logging.WARNING)
 logging.getLogger("PIL").setLevel(logging.WARNING)
@@ -150,7 +151,7 @@ class VideoProcessingPipeline:
         self.processing_stats['audio_chunked'] = True
         return audio_file_path, audio_chunk_paths
 
-    async def process_transcription(self, local_whisper:bool=False, use_assembly_ai:bool=True, ) -> List[Path]:
+    async def process_transcription(self, local_whisper: bool = False, use_assembly_ai: bool = True, ) -> List[Path]:
         """Transcribe audio chunks."""
         self.print_step(2, 3, "Audio Transcription")
 
@@ -373,16 +374,19 @@ if __name__ == "__main__":
         # If no command line args provided, use default video path
         if len(sys.argv) == 1:
             # Default video for testing
-            VIDEO_PATH = r"\\jon-nas\jon-nas\videos\livestream_videos\2025-08-14-JSM-Livestream-Skellycam\2025-08-14-JSM-Livestream-Skellycam.mp4"
-            # VIDEO_PATH = r"\\jon-nas\jon-nas\videos\livestream_videos\2025-08-07-JSM-Livestream\2025-08-07-JSM-Livestream-RAW.mp4"
+            VIDEO_PATHS = [
+                r"\\jon-nas\jon-nas\videos\livestream_videos\2025-08-14-JSM-Livestream-Skellycam\2025-08-14-JSM-Livestream-Skellycam.mp4",
+                r"\\jon-nas\jon-nas\videos\livestream_videos\2025-08-07-JSM-Livestream\2025-08-07-JSM-Livestream-RAW.mp4"]
 
-            _pipeline = VideoProcessingPipeline(
-                video_path=VIDEO_PATH,
-                force_chunk_audio=False,
-                force_transcribe=False,
-                force_analyze=False
-            )
-            asyncio.run(_pipeline.run())
+            for VIDEO_PATH in VIDEO_PATHS:
+                print(f"\n\nProcessing video: {VIDEO_PATH}\n")
+                _pipeline = VideoProcessingPipeline(
+                    video_path=VIDEO_PATH,
+                    force_chunk_audio=False,
+                    force_transcribe=False,
+                    force_analyze=False
+                )
+                asyncio.run(_pipeline.run())
         else:
             asyncio.run(main())
 
