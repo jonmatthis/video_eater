@@ -4,10 +4,10 @@ import os
 from pathlib import Path
 from typing import Type, TypeVar
 
+from dotenv import load_dotenv, find_dotenv
 from openai import AsyncOpenAI, OpenAI
 from openai.types.audio import TranscriptionVerbose
 from pydantic import BaseModel
-from dotenv import load_dotenv, find_dotenv
 
 load_dotenv(find_dotenv())
 
@@ -24,7 +24,7 @@ if not os.getenv("OPENAI_API_KEY"):
 class BaseAIProcessor:
     """Base class for AI processors with common functionality."""
 
-    def __init__(self,  model: str,force_refresh: bool = False, use_async: bool = True):
+    def __init__(self, model: str, force_refresh: bool = False, use_async: bool = True):
         self.use_deepseek = "deepseek" in model
         if not os.getenv("DEEPSEEK_API_KEY"):
             raise EnvironmentError("DEEPSEEK_API_KEY not found in env")
@@ -159,7 +159,8 @@ class BaseAIProcessor:
                         else:
                             raise api_error
 
-            else:
+            else:  # OpenAI (not deepseek)
+
                 response = await self.text_client.responses.parse(
                     model=self.model,
                     input=messages,
@@ -167,10 +168,12 @@ class BaseAIProcessor:
                 )
 
                 # The parse method returns the parsed model directly
+
                 return response.output_parsed
         except Exception as e:
             logger.error(f"Error in OpenAI JSON request: {e}")
             raise
+
 
     async def async_make_openai_text_request(self, system_prompt: str) -> str:
         """Make an OpenAI request for text generation."""

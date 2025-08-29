@@ -1,0 +1,141 @@
+# pipeline.py
+from typing import Optional
+from pydantic import BaseModel
+
+from video_eater.core.audio_extractor import AudioExtractor
+from video_eater.core.config_models import VideoProject, ProcessingStats, ProcessingConfig, TranscriptionProvider
+from video_eater.core.transcribe_audio.transcribe_audio_chunks import transcribe_audio_chunk_folder
+from video_eater.core.ai_processors.transcript_processor import TranscriptProcessor, FullVideoAnalysis
+from video_eater.logging_config import PipelineLogger
+
+
+class VideoProcessingPipeline:
+    """Clean, maintainable video processing pipeline."""
+
+    def __init__(self,
+                 config: ProcessingConfig,
+                 logger: Optional[PipelineLogger] = None):
+        self.config = config
+        self.logger = logger or PipelineLogger()
+        self.stats = ProcessingStats()
+
+    async def process_video(self, project: VideoProject):
+        """Process a single video through the pipeline."""
+
+        self.logger.step(1, 3, f"Processing: {project.video_path.name}")
+
+        # Each step is now clean and focused
+        audio_chunks = await self._extract_audio(project)
+        transcripts = await self._transcribe_chunks(project, audio_chunks)
+        analysis = await self._analyze_transcripts(project, transcripts)
+
+        await self._generate_outputs(project, analysis)
+
+        return PipelineResult(
+            project=project,
+            stats=self.stats,
+            analysis=analysis
+        )
+    
+    async def _extract_audio(self, project: VideoProject):
+        """Extract audio with clean separation of concerns."""
+
+        extractor = AudioExtractor(
+            chunk_length=self.config.chunk_length_seconds,
+            overlap=self.config.chunk_overlap_seconds
+        )
+
+        # Check cache
+        if not self.config.force_chunk_audio:
+            existing = extractor.find_existing_chunks(project.audio_chunks_folder)
+            if existing:
+                self.logger.cache_hit(f"{len(existing)} audio chunks")
+                self.stats.audio_chunks_cached = len(existing)
+                return existing
+
+        # Extract new chunks
+        chunks = await extractor.extract(
+            video_path=project.video_path,
+            output_folder=project.audio_chunks_folder
+        )
+
+        self.stats.audio_chunks_created = len(chunks)
+        self.logger.success(f"Created {len(chunks)} audio chunks")
+
+        return chunks
+
+    async def _transcribe_chunks(self, project: VideoProject, audio_chunks):
+        """Transcribe audio chunks and return transcripts."""
+        project.transcript_chunks_folder.mkdir(parents=True, exist_ok=True)
+
+        before_count = len(list(project.transcript_chunks_folder.glob("*.transcript.json")))
+
+        use_local = self.config.transcription_provider == TranscriptionProvider.LOCAL_WHISPER
+        use_aai = self.config.transcription_provider == TranscriptionProvider.ASSEMBLY_AI
+
+        transcripts = await transcribe_audio_chunk_folder(
+            audio_chunk_folder=str(project.audio_chunks_folder),
+            transcript_chunk_folder=str(project.transcript_chunks_folder),
+            file_extension=".mp3",
+            re_transcribe=self.config.force_transcribe,
+            local_whisper=use_local,
+            use_assembly_ai=use_aai,
+        )
+
+        after_count = len(list(project.transcript_chunks_folder.glob("*.transcript.json")))
+        created = max(0, after_count - before_count) if not self.config.force_transcribe else after_count
+        cached = 0 if self.config.force_transcribe else before_count
+        self.stats.transcripts_created = created
+        self.stats.transcripts_cached = cached
+        self.logger.success(f"Prepared {after_count} transcript chunks ({created} new, {cached} cached)")
+        return transcripts
+
+    async def _analyze_transcripts(self, project: VideoProject, transcripts):
+        """Analyze transcripts into a full video analysis."""
+        processor = TranscriptProcessor(
+            model=self.config.analysis_model,
+            use_async=True,
+            max_concurrent_chunks=self.config.max_concurrent_chunks,
+            batch_size=self.config.batch_size,
+            chunk_length_seconds=self.config.chunk_length_seconds,
+            chunk_overlap_seconds=self.config.chunk_overlap_seconds,
+        )
+
+        analysis = await processor.process_transcript_folder(
+            transcript_folder=project.transcript_chunks_folder,
+            chunk_analysis_output_folder=project.analysis_folder,
+        )
+
+        self.stats.analyses_created = processor.processing_stats.get('chunks_processed', 0)
+        self.stats.analyses_cached = processor.processing_stats.get('chunks_cached', 0)
+        return analysis
+
+    async def _generate_outputs(self, project: VideoProject, analysis):
+        """Outputs are generated during analysis; keep for API completeness."""
+        return None
+
+
+class PipelineResult(BaseModel):
+    """Result of pipeline processing."""
+    project: VideoProject
+    stats: ProcessingStats
+    analysis: Optional[FullVideoAnalysis] = None
+
+    def summary_report(self) -> str:
+        """Generate a summary report."""
+        return f"""
+Pipeline Results for {self.project.title or self.project.video_path.name}
+{'=' * 60}
+
+Processing Statistics:
+- Audio chunks: {self.stats.audio_chunks_created} created, {self.stats.audio_chunks_cached} cached
+- Transcripts: {self.stats.transcripts_created} created, {self.stats.transcripts_cached} cached  
+- Analyses: {self.stats.analyses_created} created, {self.stats.analyses_cached} cached
+- Cache hit rate: {self.stats.cache_hit_rate:.1%}
+- Total duration: {self.stats.total_duration_seconds:.1f}s
+
+Analysis Summary:
+- Chapters: {len(self.analysis.chapters) if self.analysis else 0}
+- Main themes: {len(self.analysis.main_themes) if self.analysis else 0}
+- Key takeaways: {len(self.analysis.key_takeaways) if self.analysis else 0}
+"""
