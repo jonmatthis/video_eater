@@ -216,7 +216,7 @@ class VideoProcessingPipeline:
             print(f"   {analysis['executive_summary']}")
             print(f"\n📊 Analysis contains:")
             print(f"   • {len(analysis.get('chapters', []))} chapters")
-            print(f"   • {len(analysis.get('main_topics', []))} main topics")
+            print(f"   • {len(analysis.get('main_themes', analysis.get('main_topics', [])))} main topics")
             print(f"   • {len(analysis.get('key_takeaways', []))} key takeaways")
             return analysis
 
@@ -254,10 +254,9 @@ class VideoProcessingPipeline:
         print(f"\n⏱️ Total processing time: {elapsed:.1f}s")
         print(f"\n📝 Executive Summary:")
         print(f"   {full_analysis.executive_summary}\n")
-
         print(f"📊 Analysis Statistics:")
         print(f"   • {len(full_analysis.chapters)} chapters generated")
-        print(f"   • {len(full_analysis.main_topics)} main topics identified")
+        print(f"   • {len(full_analysis.main_themes)} main topics identified")
         print(f"   • {len(full_analysis.key_takeaways)} key takeaways extracted")
 
         if full_analysis.pull_quotes:

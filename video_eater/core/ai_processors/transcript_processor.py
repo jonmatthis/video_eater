@@ -179,7 +179,13 @@ class TranscriptProcessor:
         Please provide:
         1. A comprehensive summary of this chunk
         2. Key topics discussed (as a list)
-        3. A hierarchical topic outline (topics as keys, subtopics as lists)
+        3. A hierarchical topic outline using this schema:
+           - chunk_outline: list of TopicOutlineItem objects, each with:
+             • topic (string)
+             • topic_overview (string)
+             • subtopics: list of SubTopicOutlineItem objects, each with:
+               – subtopic (string)
+               – details (list of strings)
         4. Timestamped chapter headings (3-7 chapters, depending on content)
         5. Pull quotes FROM THE transcript_text that either include important insights, clever/interesting/funny turns of phrase, or both. These must be WORD FOR WORD TRANSCRIPTIONS of things that were said in the video/transcripts
 
@@ -394,6 +400,7 @@ class TranscriptProcessor:
         all_chapters = []
         all_quotes = []
         combined_outline = {}
+        # Combined outline structure: {topic: {"topic_overview": str, "subtopics": {subtopic: set(details)}}}
 
         for analysis in chunk_analyses:
             all_topics.extend(analysis.key_topics)
@@ -401,41 +408,55 @@ class TranscriptProcessor:
             if analysis.pull_quotes:
                 all_quotes.extend(analysis.pull_quotes[:3] if len(analysis.pull_quotes) > 2 else analysis.pull_quotes)
 
-            # Merge outlines
-            for topic, subtopics in analysis.chunk_outline:
-                if topic in combined_outline:
-                    if isinstance(subtopics, list):
-                        combined_outline[topic].extend(
-                            [st for st in subtopics if st not in combined_outline[topic]]
-                        )
-                else:
-                    combined_outline[topic] = subtopics if isinstance(subtopics, list) else []
+            # Merge outlines (TopicOutlineItem -> SubTopicOutlineItem)
+            for item in analysis.chunk_outline:
+                topic = item.topic
+                entry = combined_outline.setdefault(topic, {"topic_overview": item.topic_overview or "", "subtopics": {}})
+                if not entry["topic_overview"] and item.topic_overview:
+                    entry["topic_overview"] = item.topic_overview
+                for st in item.subtopics:
+                    st_entry = entry["subtopics"].setdefault(st.subtopic, set())
+                    for det in (st.details or []):
+                        st_entry.add(det)
 
         # Create a context string for the AI
+        # Build raw outline list for the model input
+        raw_outline = []
+        for topic, data in combined_outline.items():
+            subtopic_list = [
+                {"subtopic": st, "details": sorted(list(details))}
+                for st, details in data["subtopics"].items()
+            ]
+            raw_outline.append({
+                "topic": topic,
+                "topic_overview": data["topic_overview"],
+                "subtopics": subtopic_list
+            })
+
         context = {
             "video_title": video_title or "Video",
             "chunk_summaries": all_summaries,
             "all_topics": list(set(all_topics)),  # Deduplicate
-            "raw_outline": combined_outline,
+            "raw_outline": raw_outline,
             "all_chapters": [
                 {"time": self.format_timestamp(ch.timestamp_seconds),
                  "title": ch.title,
                  "description": ch.description}
                 for ch in all_chapters
             ],
-            "quotes": all_quotes
+            "quotes": [pq.model_dump() for pq in all_quotes]
         }
 
         system_prompt = """You are creating a comprehensive analysis of a complete video based on individual chunk analyses.
 
-        Synthesize the provided information to create:
-        1. An executive summary (2-3 sentences capturing the essence)
-        2. A detailed summary (comprehensive but concise overview)
-        3. Main topics list (deduplicated and organized by importance)
-        4. A complete hierarchical outline (reorganized and cleaned up)
-        5. A refined chapter list (combine similar chapters, ensure logical flow)
-        6. Key takeaways (5-10 main insights)
-        7. Most notable quotes (select the best 8-10, emphasizing the most interesting and relevant) 
+        Synthesize the provided information to create the FullVideoAnalysis object:
+        1. executive_summary (2-3 sentences capturing the essence)
+        2. detailed_summary (comprehensive but concise overview)
+        3. main_themes (deduplicated and organized by importance)
+        4. complete_outline: list of TopicOutlineItem objects with topic, topic_overview, and subtopics (list of SubTopicOutlineItem with subtopic and details list)
+        5. chapters: refined list (combine similar chapters, ensure logical flow)
+        6. key_takeaways (5-10 main insights)
+        7. pull_quotes: select the best 8-10 PullQuote objects
 
         For chapters:
         - Combine very similar/redundant chapters
@@ -485,8 +506,10 @@ class TranscriptProcessor:
             if analysis.pull_quotes:
                 f.write("\n💬 NOTABLE QUOTES\n")
                 f.write("-" * 50 + "\n")
-                for quote in analysis.pull_quotes:
-                    f.write(f'"{quote}"\n\n')
+                for pq in analysis.pull_quotes:
+                    ts = self.format_timestamp(pq.timestamp_seconds)
+                    for line in pq.pull_quotes:
+                        f.write(f"{ts} - \"{line}\"\n")
 
         print(f"📄 Generated YouTube description at {youtube_file}")
 
@@ -502,16 +525,19 @@ class TranscriptProcessor:
             f.write(analysis.detailed_summary + "\n\n")
 
             f.write("## Main Topics\n\n")
-            for topic in analysis.main_topics:
+            for topic in analysis.main_themes:
                 f.write(f"- {topic}\n")
             f.write("\n")
 
             f.write("## Complete Topic Outline\n\n")
-            for topic, subtopics in analysis.complete_outline.items():
-                f.write(f"### {topic}\n")
-                if isinstance(subtopics, list):
-                    for subtopic in subtopics:
-                        f.write(f"- {subtopic}\n")
+            for item in analysis.complete_outline:
+                f.write(f"### {item.topic}\n")
+                if getattr(item, "topic_overview", None):
+                    f.write(f"> {item.topic_overview}\n\n")
+                for st in item.subtopics:
+                    f.write(f"- {st.subtopic}\n")
+                    for det in st.details:
+                        f.write(f"  - {det}\n")
                 f.write("\n")
 
             f.write("## Video Chapters\n\n")
@@ -528,7 +554,9 @@ class TranscriptProcessor:
 
             if analysis.pull_quotes:
                 f.write("\n## Notable Quotes\n\n")
-                for quote in analysis.pull_quotes:
-                    f.write(f"> \"{quote}\"\n\n")
+                for pq in analysis.pull_quotes:
+                    ts = self.format_timestamp(pq.timestamp_seconds)
+                    for line in pq.pull_quotes:
+                        f.write(f"> [{ts}] \"{line}\"\n\n")
 
         print(f"📄 Generated markdown report at {markdown_file}")
