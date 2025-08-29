@@ -156,7 +156,7 @@ class TranscriptProcessor:
         2. Key topics discussed (as a list)
         3. A hierarchical topic outline (topics as keys, subtopics as lists)
         4. Timestamped chapter headings (3-7 chapters, depending on content)
-        5. Notable pull-quotes if any
+        5. Notable quotes FROM THE transcript_text that either include important insights, clever/interesting/funny turns of phrase, or both. These must be WORD FOR WORD TRANSCRIPTIONS of things that were said in the video/transcripts
 
         For chapter timestamps, use relative times from the START of this chunk (0 seconds).
         Make chapters meaningful and descriptive, not just "Introduction" or "Conclusion".
@@ -211,7 +211,7 @@ class TranscriptProcessor:
 
                 # Extract text
                 if isinstance(transcript_data, dict):
-                    transcript_text = transcript_data.get('text', '')
+                    transcript_text = transcript_data['full_transcript']
                 else:
                     transcript_text = str(transcript_data)
 
@@ -258,15 +258,12 @@ class TranscriptProcessor:
 
     async def process_transcript_folder(self,
                                         transcript_folder: Path,
-                                        output_folder: Path | None = None) -> FullVideoAnalysis:
+                                        chunk_analysis_output_folder: Path) -> FullVideoAnalysis:
         """Process all transcript chunks in a folder with parallel processing."""
 
         start_time = time.time()
 
-        # Set up output folder
-        if output_folder is None:
-            output_folder = transcript_folder.parent / "analysis_chunks"
-        output_folder.mkdir(parents=True, exist_ok=True)
+        chunk_analysis_output_folder.mkdir(parents=True, exist_ok=True)
 
         # Find all transcript JSON files
         transcript_files = sorted(transcript_folder.glob("*.transcript.json"))
@@ -309,7 +306,7 @@ class TranscriptProcessor:
             print(f"\n📋 Processing batch {current_batch_num}/{total_batches} " +
                   f"(chunks {batch[0][0]}-{batch[-1][0]})")
 
-            batch_analyses = await self.process_transcript_batch(batch, output_folder)
+            batch_analyses = await self.process_transcript_batch(batch, chunk_analysis_output_folder)
             all_chunk_analyses.extend(batch_analyses)
 
             print(f"✅ Batch {current_batch_num} complete")
@@ -335,7 +332,7 @@ class TranscriptProcessor:
         full_analysis = self.deduplicate_chapters(full_analysis)
 
         # Save combined analysis as YAML
-        combined_file = output_folder / "full_video_analysis.yaml"
+        combined_file = chunk_analysis_output_folder.parent / "full_video_analysis.yaml"
         with open(combined_file, 'w', encoding='utf-8') as f:
             yaml.dump(full_analysis.model_dump(), f,
                       default_flow_style=False,
@@ -344,7 +341,7 @@ class TranscriptProcessor:
         print(f"💾 Saved combined analysis to {combined_file}")
 
         # Generate formatted outputs
-        await self.generate_formatted_outputs(full_analysis, output_folder)
+        await self.generate_formatted_outputs(full_analysis, chunk_analysis_output_folder.parent)
 
         return full_analysis
 
@@ -381,7 +378,7 @@ class TranscriptProcessor:
             all_topics.extend(analysis.key_topics)
             all_chapters.extend(analysis.chapters)
             if analysis.notable_quotes:
-                all_quotes.extend(analysis.notable_quotes)
+                all_quotes.extend(analysis.notable_quotes[:3] if len(analysis.notable_quotes)>2 else analysis.notable_quotes)
 
             # Merge outlines
             for topic, subtopics in analysis.topic_outline.items():
@@ -405,7 +402,7 @@ class TranscriptProcessor:
                  "description": ch.description}
                 for ch in all_chapters
             ],
-            "quotes": all_quotes[:10]  # Limit to top 10 quotes
+            "quotes": all_quotes
         }
 
         system_prompt = """You are creating a comprehensive analysis of a complete video based on individual chunk analyses.
@@ -417,7 +414,7 @@ class TranscriptProcessor:
         4. A complete hierarchical outline (reorganized and cleaned up)
         5. A refined chapter list (combine similar chapters, ensure logical flow)
         6. Key takeaways (5-10 main insights)
-        7. Most notable quotes (select the best 3-5 if available)
+        7. Most notable quotes (select the best 8-10, emphasizing the most interesting and relevant) 
 
         For chapters:
         - Combine very similar/redundant chapters

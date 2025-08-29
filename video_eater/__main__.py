@@ -8,6 +8,12 @@ from typing import Optional, List, Tuple
 # Add the parent directory to sys.path to make the package importable
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
+import logging
+logging.getLogger("matplotlib").setLevel(logging.WARNING)
+logging.getLogger("numba").setLevel(logging.WARNING)
+logging.getLogger("PIL").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("openai").setLevel(logging.WARNING)
 
 from video_eater.core.ai_processors.transcript_processor import TranscriptProcessor
 from video_eater.core.transcribe_audio.transcribe_audio_chunks import transcribe_audio_chunk_folder
@@ -43,7 +49,7 @@ class VideoProcessingPipeline:
             'max_concurrent_chunks': 50,
             'batch_size': 50,
             'chunk_length_seconds': 600,
-            'chunk_overlap_seconds': 15,
+            'chunk_overlap_seconds': 30,
             'model': 'deepseek-chat',
         }
 
@@ -143,7 +149,7 @@ class VideoProcessingPipeline:
         self.processing_stats['audio_chunked'] = True
         return audio_file_path, audio_chunk_paths
 
-    async def process_transcription(self) -> List[Path]:
+    async def process_transcription(self, local_whisper:bool=False, use_assembly_ai:bool=True, ) -> List[Path]:
         """Transcribe audio chunks."""
         self.print_step(2, 3, "Audio Transcription")
 
@@ -171,6 +177,8 @@ class VideoProcessingPipeline:
         await transcribe_audio_chunk_folder(
             audio_chunk_folder=str(self.audio_chunks_folder),
             transcript_chunk_folder=str(self.transcript_chunks_folder),
+            local_whisper=local_whisper,
+            use_assembly_ai=use_assembly_ai,
             re_transcribe=self.force_transcribe
         )
 
@@ -234,7 +242,7 @@ class VideoProcessingPipeline:
         # Process all transcripts
         full_analysis = await processor.process_transcript_folder(
             transcript_folder=self.transcript_chunks_folder,
-            output_folder=self.recording_folder
+            chunk_analysis_output_folder=self.recording_folder / "analysis_chunks"
         )
 
         elapsed = time.time() - start_time
@@ -283,7 +291,7 @@ class VideoProcessingPipeline:
             await self.process_audio_extraction()
 
             # Step 2: Transcribe audio chunks
-            await self.process_transcription()
+            await self.process_transcription(local_whisper=False, use_assembly_ai=True)
 
             # Step 3: Analyze transcripts
             await self.process_analysis()

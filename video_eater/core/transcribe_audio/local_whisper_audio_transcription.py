@@ -1,11 +1,10 @@
 import json
 import logging
 from pathlib import Path
+import matplotlib.pyplot as plt
 
-import cv2
+from openai.types.audio import TranscriptionVerbose
 
-from skellysubs.ai_clients.openai_client import get_or_create_openai_client
-from skellysubs.core.audio_transcription.whisper_transcript_result_model import WhisperTranscriptionResult
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -21,20 +20,8 @@ def validate_audio_path(audio_path: str) -> None:
         raise ValueError(f"Unsupported file format: {audio_path}")
 
 
-async def transcribe_audio(audio_path: str, local_whisper: bool = False, model_name: str = "large") -> WhisperTranscriptionResult:
-    if local_whisper:
-        return transcribe_audio_with_local_whisper(audio_path, model_name)
-    else:
-        return await transcribe_audio_openai(audio_path)
 
-async def transcribe_audio_openai(audio_path: str) -> WhisperTranscriptionResult:
-    validate_audio_path(audio_path)
-    result = await get_or_create_openai_client().make_whisper_transcription_request(audio_file_path=audio_path, prompt=TRANSCRIPTION_BASE_PROMPT)
-    transcript_file_path = Path(audio_path.replace(Path(audio_path).suffix, "_transcription.json"))
-    Path(transcript_file_path).write_text(json.dumps(result.model_dump(), indent=4), encoding='utf-8')
-    return WhisperTranscriptionResult.from_from_verbose_transcript(result)
-
-def transcribe_audio_with_local_whisper(audio_path: str, model_name: str = "large") -> WhisperTranscriptionResult:
+def transcribe_audio_with_local_whisper(audio_path: str, model_name: str = "large",save_mel_spectrogram_image:bool=False) -> TranscriptionVerbose:
     import whisper
     import torch
     logger.info(
@@ -42,6 +29,8 @@ def transcribe_audio_with_local_whisper(audio_path: str, model_name: str = "larg
 
     validate_audio_path(audio_path)
     model = whisper.load_model(model_name)
+    # make log-Mel spectrogram and move to the same device as the model
+
     result = model.transcribe(audio = audio_path,
                               word_timestamps=True,
                               temperature=0.0,
@@ -49,7 +38,13 @@ def transcribe_audio_with_local_whisper(audio_path: str, model_name: str = "larg
                               hallucination_silence_threshold=0.5,
                               initial_prompt=TRANSCRIPTION_BASE_PROMPT,
                               )
-    return WhisperTranscriptionResult(**result)
+    audio = whisper.load_audio(audio_path)
+    audio = whisper.pad_or_trim(audio)
+    if save_mel_spectrogram_image:
+        # make log-Mel spectrogram and move to the same device as the model
+        mel = whisper.log_mel_spectrogram(audio, n_mels=model.dims.n_mels).to(model.device)
+        save_spectrogram_image(audio_path, mel)
+    return TranscriptionVerbose(**result)
 
 
 def transcribe_audio_detailed(audio_path: str,
@@ -82,8 +77,21 @@ def transcribe_audio_detailed(audio_path: str,
 
 
 def save_spectrogram_image(audio_path, mel):
+    # Using matplotlib instead of cv2
     mel_as_numpy = mel.cpu().numpy()
-    mel_image = cv2.resize(mel_as_numpy, (4000, 1000))
-    mel_image_scaled = cv2.normalize(mel_image, None, 0, 255, cv2.NORM_MINMAX)
-    mel_image_heatmapped = cv2.applyColorMap(mel_image_scaled.astype('uint8'), cv2.COLORMAP_PLASMA)
-    cv2.imwrite(str(Path(audio_path).with_suffix(".log_mel_spectrogram.png")), mel_image_heatmapped)
+
+    plt.figure(figsize=(12, 4))
+    plt.imshow(mel_as_numpy, aspect='auto', origin='lower', cmap='plasma')
+    plt.colorbar()
+    plt.title('Log-Mel Spectrogram')
+    plt.xlabel('Time')
+    plt.ylabel('Mel Frequency')
+
+    output_path = Path(audio_path).with_suffix(".log_mel_spectrogram.png")
+    plt.savefig(str(output_path), dpi=150, bbox_inches='tight')
+    plt.close()
+
+
+if __name__ == "__main__":
+    _audio_path = r"\\jon-nas\jon-nas\videos\livestream_videos\2025-08-14-JSM-Livestream-Skellycam\audio_chunks\2025-08-14-JSM-Livestream-Skellycam_chunk_013_02h-06m-45sec.mp3"
+    transcribe_audio_with_local_whisper(audio_path=_audio_path)

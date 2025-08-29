@@ -1,9 +1,31 @@
 import math
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import List
 
 from tqdm import tqdm
+
+
+def extract_single_chunk(args):
+    """Extract a single audio chunk."""
+    input_file, start_time, end_time, chunk_path = args
+
+    cmd = [
+        "ffmpeg",
+        "-i", input_file,
+        "-ss", str(start_time),
+        "-to", str(end_time),
+        "-q:a", "0",
+        "-y", chunk_path,
+    ]
+
+    subprocess.run(
+        cmd, check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
+    return chunk_path
 
 
 def extract_audio_from_video(
@@ -71,6 +93,7 @@ def chunk_audio_file(
         audio_chunk_folder: str,
         chunk_length_seconds: float = 600,
         chunk_overlap_seconds: float = 30,
+        max_workers: int = 10,  # Limit parallel workers
 ) -> List[str]:
     """
     Split an audio file into overlapping chunks using ffmpeg.
@@ -106,48 +129,40 @@ def chunk_audio_file(
 
     chunk_files = []
 
+    # Prepare all chunk tasks
+    chunk_tasks = []
+
+
     # Create chunks with progress bar
-    with tqdm(total=num_chunks, desc=f"Chunking audio", unit="chunk") as pbar:
-        for i in range(num_chunks):
-            # Calculate start and end times for this chunk
-            start_time = i * step_size
+    for i in range(num_chunks - 1):
+
+        # Calculate start and end times for this chunk
+        start_time = i * step_size
+        if i == num_chunks - 2:
+            end_time = duration
+        else:
             end_time = min(start_time + chunk_length_seconds, duration)
-            hours = int(start_time // 3600)
-            minutes = int((start_time % 3600) // 60)
-            seconds = int(start_time % 60)
-            # Create output filename
-            chunk_filename = f"{base_name}_chunk_{i:03d}_{hours:02d}h-{minutes:02d}m-{seconds:02d}sec.mp3"
-            chunk_path = str(Path(audio_chunk_folder) / chunk_filename)
-            chunk_files.append(chunk_path)
+        hours = int(start_time // 3600)
+        minutes = int((start_time % 3600) // 60)
+        seconds = int(start_time % 60)
+        # Create output filename
+        chunk_filename = f"{base_name}_chunk_{i:03d}_{hours:02d}h-{minutes:02d}m-{seconds:02d}sec.mp3"
+        chunk_path = str(Path(audio_chunk_folder) / chunk_filename)
+        chunk_files.append(chunk_path)
+        chunk_tasks.append((input_file, start_time, end_time, chunk_path))
 
-            # Use ffmpeg to extract the chunk
-            cmd = [
-                "ffmpeg",
-                "-i",
-                input_file,
-                "-ss",
-                str(start_time),
-                "-to",
-                str(end_time),
-                "-q:a",
-                "0",  # Use highest quality
-                "-y",  # Overwrite output file if it exists
-                chunk_path,
-            ]
+    chunk_files = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(extract_single_chunk, task): task
+                   for task in chunk_tasks}
 
-            # Run the command
-            subprocess.run(
-                cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
+        with tqdm(total=len(futures), desc="Chunking audio", unit="chunk") as pbar:
+            for future in as_completed(futures):
+                chunk_path = future.result()
+                chunk_files.append(chunk_path)
+                pbar.update(1)
 
-            # Update progress
-            pbar.update(1)
-            pbar.set_description(
-                f"Chunk {i + 1}/{num_chunks}: {start_time:.1f}s-{end_time:.1f}s"
-            )
-
-    print(f"Created {len(chunk_files)} audio chunks in {audio_chunk_folder}")
-    return chunk_files
+    return sorted(chunk_files)
 
 
 if __name__ == "__main__":

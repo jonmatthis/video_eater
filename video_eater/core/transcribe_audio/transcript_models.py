@@ -4,9 +4,9 @@ from openai.types.audio import TranscriptionVerbose
 
 class TranscriptSegment(BaseModel):
     text: str
-    start: float
-    dur: float = None
-    end: float = None
+    start: float  # seconds
+    dur: float = None  # seconds
+    end: float = None  # seconds
 
     def model_post_init(self, __context) -> None:
         # Calculate end time if not provided
@@ -18,13 +18,34 @@ class TranscriptSegment(BaseModel):
             self.dur = self.end - self.start
 
 
-
 class VideoTranscript(BaseModel):
-    video_id: str = ""
     transcript_segments: list[TranscriptSegment]
     full_transcript: str = ""
 
+    @classmethod
+    def from_assembly_ai_output(cls, aai_result):
+        # Extract full transcript text
+        full_transcript = ""
 
+        # Create transcript segments from either words or segments/utterances
+        transcript_segments = []
+
+        # If we have segments/utterances, use those (they have start/end times)
+        if aai_result.get("paragraphs"):
+            for segment in aai_result["paragraphs"]:
+                transcript_segments.append(
+                    TranscriptSegment(
+                        text=segment.text,
+                        start=segment.start / 1000.0,  # Convert ms to seconds
+                        end=segment.end / 1000.0      # Convert ms to seconds
+                    )
+                )
+                full_transcript += f"{segment.text}\n\n"
+
+        return cls(
+            full_transcript=full_transcript,
+            transcript_segments=transcript_segments
+        )
 
     @classmethod
     def from_openai_transcript(cls, transcript_data: TranscriptionVerbose) -> 'VideoTranscript':
@@ -35,6 +56,8 @@ class VideoTranscript(BaseModel):
                 for segment in transcript_data.segments
             ],
         )
+
+
 class ProcessedTranscript(BaseModel):
     video_id: str
     title: str

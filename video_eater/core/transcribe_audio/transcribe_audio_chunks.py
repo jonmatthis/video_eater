@@ -1,18 +1,25 @@
 import asyncio
 import json
+import os
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Tuple
+from xml.dom import ValidationErr
+
 from openai.types.audio import TranscriptionVerbose
 
 from video_eater.core.ai_processors.base_processor import BaseAIProcessor
+from video_eater.core.transcribe_audio.local_whisper_audio_transcription import transcribe_audio_with_local_whisper
+from video_eater.core.transcribe_audio.transcribe_audio_assembly_ai import async_transcribe_with_assemblyai
 from video_eater.core.transcribe_audio.transcript_models import VideoTranscript
 
 
 async def transcribe_audio_chunk_folder(
         audio_chunk_folder: str,
-transcript_chunk_folder: str,
+        transcript_chunk_folder: str,
         file_extension: str = ".mp3",
-        re_transcribe: bool = False
+        re_transcribe: bool = False,
+        local_whisper: bool = False,
+        use_assembly_ai: bool = True
 ) -> List[VideoTranscript]:
     """
     Transcribe all audio chunks in a folder.
@@ -60,7 +67,9 @@ transcript_chunk_folder: str,
         print(f"\n🎙️ Transcribing {len(chunks_to_transcribe)} audio chunks...")
         new_transcripts = await transcribe_audio_chunks(
             chunk_paths=chunks_to_transcribe,
-            reprocess_all=re_transcribe
+            reprocess_all=re_transcribe,
+            local_whisper=local_whisper,
+            use_assembly_ai=True
         )
     else:
         print(f"   ℹ️ All chunks already transcribed")
@@ -73,9 +82,13 @@ transcript_chunk_folder: str,
     for transcript_path in existing_transcripts:
         with open(transcript_path, 'r', encoding='utf-8') as f:
             transcript_data = json.load(f)
-            all_transcripts.append(VideoTranscript.from_openai_transcript(
-                TranscriptionVerbose(**transcript_data)
-            ))
+            try:
+                all_transcripts.append(VideoTranscript.from_openai_transcript(
+                    TranscriptionVerbose(**transcript_data)
+                ))
+            except Exception as e:
+                all_transcripts.append(VideoTranscript(**transcript_data))
+
 
     # Add new transcripts
     all_transcripts.extend(new_transcripts)
@@ -87,8 +100,9 @@ async def _transcribe_single_chunk(
         chunk_path: Path,
         transcript_output_json_path: Path,
         chunk_index: int,
-        total_chunks: int
-) -> Tuple[TranscriptionVerbose, str]:
+        total_chunks: int,
+        local_whisper: bool,
+        use_assembly_ai: bool = True) -> Tuple[TranscriptionVerbose|VideoTranscript, str]:
     """
     Transcribe a single audio chunk.
 
@@ -102,11 +116,16 @@ async def _transcribe_single_chunk(
         Tuple of (transcript, path_to_saved_json)
     """
     print(f"  [{chunk_index}/{total_chunks}] Transcribing: {chunk_path.name}")
-
-    ai = BaseAIProcessor(use_async=True)
-    transcript = await ai.async_make_whisper_transcription_request(
-        audio_file_path=str(chunk_path)
-    )
+    if local_whisper:
+        transcript = transcribe_audio_with_local_whisper(audio_path=str(chunk_path),
+                                                         model_name="large")
+    elif use_assembly_ai:
+        transcript = await async_transcribe_with_assemblyai(str(chunk_path), os.getenv("ASSEMBLY_AI_API_KEY"))
+    else:
+        ai = BaseAIProcessor(use_async=True)
+        transcript = await ai.async_make_whisper_transcription_request(
+            audio_file_path=str(chunk_path)
+        )
 
     # Save transcript
     transcript_output_json_path.write_text(
@@ -122,8 +141,9 @@ async def _transcribe_single_chunk(
 async def transcribe_audio_chunks(
         chunk_paths: List[Tuple[Path, Path]],
         reprocess_all: bool = False,
-        max_concurrent: int = 50
-) -> List[VideoTranscript]:
+        local_whisper: bool = False,
+        use_assembly_ai: bool = True,
+        max_concurrent: int = 50) -> List[VideoTranscript]:
     """
     Transcribe multiple audio chunks with concurrency control.
 
@@ -145,11 +165,13 @@ async def transcribe_audio_chunks(
             audio_path: Path,
             transcript_path: Path,
             index: int
-    ) -> Tuple[TranscriptionVerbose, str]:
+    ) -> Tuple[TranscriptionVerbose|VideoTranscript, str]:
         async with semaphore:
             return await _transcribe_single_chunk(
                 chunk_path=audio_path,
                 transcript_output_json_path=transcript_path,
+                local_whisper=local_whisper,
+                use_assembly_ai=use_assembly_ai,
                 chunk_index=index,
                 total_chunks=len(chunk_paths)
             )
@@ -157,6 +179,7 @@ async def transcribe_audio_chunks(
     # Create tasks for all chunks
     tasks = []
     for i, (audio_path, transcript_path) in enumerate(chunk_paths, 1):
+
         task = asyncio.create_task(
             transcribe_with_semaphore(audio_path, transcript_path, i)
         )
@@ -175,13 +198,17 @@ async def transcribe_audio_chunks(
             errors.append((chunk_paths[i][0].name, str(result)))
         else:
             transcript, _ = result
-            transcripts.append(VideoTranscript.from_openai_transcript(transcript))
+            if isinstance(transcript, TranscriptionVerbose):
+                transcripts.append(VideoTranscript.from_openai_transcript(transcript))
+            elif isinstance(transcript,VideoTranscript):
+                transcripts.append(transcript)
 
     # Report any errors
     if errors:
         print(f"\n⚠️ Transcription errors occurred:")
         for filename, error in errors:
             print(f"   • {filename}: {error}")
+        raise RuntimeError(f"\n⚠️ Transcription errors occurred:")
 
     print(f"\n✅ Successfully transcribed {len(transcripts)} chunks")
 
