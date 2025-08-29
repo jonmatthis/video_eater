@@ -19,7 +19,7 @@ class ProcessingConfig(BaseModel):
     chunk_overlap_seconds: int = Field(15, ge=0, le=60)
 
     # AI models
-    analysis_model: str = Field("gpt-4.1", description="Model for analysis")
+    analysis_model: str = Field("gpt-4.1-nano", description="Model for analysis")
     transcription_provider: TranscriptionProvider = TranscriptionProvider.OPENAI
     whisper_model: Optional[str] = "large"
 
@@ -73,19 +73,19 @@ class VideoProject(BaseModel):
     # Computed paths
     @property
     def audio_chunks_folder(self) -> Path:
-        return self.video_path.parent / "audio_chunks"
+        return self.video_path.parent / "chunks"/ "audio_chunks"
 
     @property
     def transcript_chunks_folder(self) -> Path:
-        return self.video_path.parent / "transcript_chunks"
+        return self.video_path.parent / "chunks"/ "transcript_chunks"
 
     @property
     def analysis_folder(self) -> Path:
-        return self.video_path.parent / "analysis_chunks"
+        return self.video_path.parent / "chunks"/ "analysis_chunks"
 
     @property
     def output_folder(self) -> Path:
-        return self.video_path.parent / "outputs"
+        return self.video_path.parent / "full_outputs"
 
     class Config:
         arbitrary_types_allowed = True

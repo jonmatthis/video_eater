@@ -33,8 +33,8 @@ def main(video_paths, config, force_all, log_level):
     # Default videos if none provided
     if not video_paths:
         video_paths = [
-            # r"C:\Users\jonma\Sync\videos\social-media-posts\2025-07-04-TikTok-GeneralStrike2028\testtest\2025-07-04-TikTok-GeneralStrike2028.mp4"
-            r"\\jon-nas\jon-nas\videos\livestream_videos\2025-08-14-JSM-Livestream-Skellycam\2025-08-14-JSM-Livestream-Skellycam.mp4",
+            r"C:\Users\jonma\Sync\videos\social-media-posts\2025-07-04-TikTok-GeneralStrike2028\testtest\2025-07-04-TikTok-GeneralStrike2028.mp4"
+            # r"\\jon-nas\jon-nas\videos\livestream_videos\2025-08-14-JSM-Livestream-Skellycam\2025-08-14-JSM-Livestream-Skellycam.mp4",
             # ... other default paths
         ]
 

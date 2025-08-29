@@ -4,8 +4,11 @@ from pydantic import BaseModel
 
 from video_eater.core.audio_extractor import AudioExtractor
 from video_eater.core.config_models import VideoProject, ProcessingStats, ProcessingConfig, TranscriptionProvider
+from video_eater.core.output_templates import YouTubeDescriptionFormatter, MarkdownReportFormatter, JsonFormatter, \
+    SimpleTextFormatter
 from video_eater.core.transcribe_audio.transcribe_audio_chunks import transcribe_audio_chunk_folder
-from video_eater.core.ai_processors.transcript_processor import TranscriptProcessor, FullVideoAnalysis
+from video_eater.core.ai_processors.transcript_processor import TranscriptProcessor
+from video_eater.core.ai_processors.ai_prompt_models import FullVideoAnalysis
 from video_eater.logging_config import PipelineLogger
 
 
@@ -28,9 +31,7 @@ class VideoProcessingPipeline:
         audio_chunks = await self._extract_audio(project)
         transcripts = await self._transcribe_chunks(project, audio_chunks)
         analysis = await self._analyze_transcripts(project, transcripts)
-
-        await self._generate_outputs(project, analysis)
-
+        output_files = await self._generate_outputs(project, analysis)
         return PipelineResult(
             project=project,
             stats=self.stats,
@@ -110,9 +111,35 @@ class VideoProcessingPipeline:
         self.stats.analyses_cached = processor.processing_stats.get('chunks_cached', 0)
         return analysis
 
-    async def _generate_outputs(self, project: VideoProject, analysis):
-        """Outputs are generated during analysis; keep for API completeness."""
-        return None
+
+    async def _generate_outputs(self, project: VideoProject, analysis: FullVideoAnalysis):
+        """Generate outputs using configurable formatters."""
+
+        # Define which formatters to use (this could come from config)
+        formatters = {
+            f'{project.video_path.stem}_youtube_description.txt': YouTubeDescriptionFormatter(),
+            f'{project.video_path.stem}_video_analysis_report.md': MarkdownReportFormatter(),
+            f'{project.video_path.stem}_video_analysis.json': JsonFormatter(),
+            f'{project.video_path.stem}_video_summary.txt': SimpleTextFormatter(),
+        }
+
+        # You could also make this configurable in ProcessingConfig
+        if hasattr(self.config, 'output_formats'):
+            # Allow config to override default formatters
+            formatters = self.config.output_formats
+
+        output_folder = project.output_folder
+        output_folder.mkdir(parents=True, exist_ok=True)
+
+        for filename, formatter in formatters.items():
+            output_file = output_folder / filename
+            content = formatter.format(analysis)
+            with open(output_file, 'w', encoding='utf-8') as f:
+                f.write(content)
+            self.logger.success(f"Generated {filename}")
+
+        return list(formatters.keys())
+
 
 
 class PipelineResult(BaseModel):

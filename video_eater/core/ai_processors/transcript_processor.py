@@ -8,59 +8,13 @@ from pathlib import Path
 from typing import List, Tuple
 
 import yaml
-from pydantic import BaseModel, Field
 
+from video_eater.core.ai_processors.ai_prompt_models import ChunkAnalysis, FullVideoAnalysis
 from video_eater.core.ai_processors.base_processor import BaseAIProcessor
+from video_eater.core.output_templates import YouTubeDescriptionFormatter, JsonFormatter, MarkdownReportFormatter, \
+    SimpleTextFormatter
 
 logger = logging.getLogger(__name__)
-
-
-class ChapterHeading(BaseModel):
-    timestamp_seconds: float = Field(description="Start time in seconds")
-    title: str = Field(description="Chapter title")
-    description: str = Field(description="Brief description of what happens in this chapter")
-
-class PromptModel(BaseModel):
-    pass
-
-class PullQuote(PromptModel):
-    timestamp_seconds: float = Field(description="Start time in seconds when the quote was spoken")
-    pull_quotes: list[str] = Field(
-        description="Most impactful, interesting, or otherwise notable pull quotes from the video")
-
-    reason_for_selection: str = Field(description="The reason this quote was selected as a pull quote")
-    context_around_quote: str = Field(description="Brief context around the quote to explain its significance")
-
-
-class SubTopicOutlineItem(PromptModel):
-    subtopic: str = Field(description="Subtopic under a main topic")
-    details: list[str] = Field(description="List of details or points under this subtopic")
-
-
-class TopicOutlineItem(PromptModel):
-    topic: str = Field(description="Main topic")
-    topic_overview: str = Field(description="Brief overview of the main topic")
-    subtopics: list[SubTopicOutlineItem] = Field(description="List of subtopics under this main topic")
-
-
-class ChunkAnalysis(PromptModel):
-    summary: str = Field(description="Comprehensive summary of the chunk content")
-    key_topics: list[str] = Field(description="list of main topics discussed")
-    chunk_outline: list[TopicOutlineItem] = Field(description="Hierarchical outline of topics and subtopics")
-    chapters: list[ChapterHeading] = Field(description="Timestamped chapter headings")
-    pull_quotes: list[PullQuote] = Field(
-        description="Most impactful, interesting, or otherwise notable pull quotes from the video")
-
-
-class FullVideoAnalysis(PromptModel):
-    executive_summary: str = Field(description="High-level summary of the entire video")
-    detailed_summary: str = Field(description="Comprehensive summary with key points")
-    main_themes: list[str] = Field(description="Primary themes covered across the video")
-    complete_outline: list[TopicOutlineItem] = Field(description="Hierarchical outline of topics and subtopics")
-    chapters: list[ChapterHeading] = Field(description="Full video chapter list with adjusted timestamps")
-    key_takeaways: list[str] = Field(description="Main insights and conclusions")
-    pull_quotes: list[PullQuote] = Field(
-        description="Most impactful, interesting, or otherwise notable pull quotes from the video")
 
 
 async def _return_cached(idx: int, analysis: ChunkAnalysis):
@@ -483,82 +437,38 @@ class TranscriptProcessor:
     async def generate_formatted_outputs(self,
                                          analysis: FullVideoAnalysis,
                                          output_folder: Path):
-        """Generate user-friendly formatted outputs."""
+        """Generate user-friendly formatted outputs using template formatters."""
+
+        # Initialize formatters
+        youtube_formatter = YouTubeDescriptionFormatter()
+        markdown_formatter = MarkdownReportFormatter()
+        json_formatter = JsonFormatter()
+        simple_formatter = SimpleTextFormatter()
 
         # YouTube description with chapters
         youtube_file = output_folder / "youtube_description.txt"
+        youtube_content = youtube_formatter.format(analysis)
         with open(youtube_file, 'w', encoding='utf-8') as f:
-            f.write("📝 VIDEO SUMMARY\n")
-            f.write("=" * 50 + "\n\n")
-            f.write(analysis.executive_summary + "\n\n")
-
-            f.write("📚 CHAPTERS\n")
-            f.write("-" * 50 + "\n")
-            for chapter in analysis.chapters:
-                timestamp = self.format_timestamp(chapter.timestamp_seconds)
-                f.write(f"{timestamp} - {chapter.title}\n")
-                if chapter.description:
-                    f.write(f"   {chapter.description}\n")
-
-            f.write("\n🎯 KEY TAKEAWAYS\n")
-            f.write("-" * 50 + "\n")
-            for takeaway in analysis.key_takeaways:
-                f.write(f"• {takeaway}\n")
-
-            if analysis.pull_quotes:
-                f.write("\n💬 NOTABLE QUOTES\n")
-                f.write("-" * 50 + "\n")
-                for pq in analysis.pull_quotes:
-                    ts = self.format_timestamp(pq.timestamp_seconds)
-                    for line in pq.pull_quotes:
-                        f.write(f"{ts} - \"{line}\"\n")
-
+            f.write(youtube_content)
         print(f"📄 Generated YouTube description at {youtube_file}")
 
         # Detailed markdown report
         markdown_file = output_folder / "video_analysis_report.md"
+        markdown_content = markdown_formatter.format(analysis)
         with open(markdown_file, 'w', encoding='utf-8') as f:
-            f.write("# Video Analysis Report\n\n")
-
-            f.write("## Executive Summary\n\n")
-            f.write(analysis.executive_summary + "\n\n")
-
-            f.write("## Detailed Summary\n\n")
-            f.write(analysis.detailed_summary + "\n\n")
-
-            f.write("## Main Topics\n\n")
-            for topic in analysis.main_themes:
-                f.write(f"- {topic}\n")
-            f.write("\n")
-
-            f.write("## Complete Topic Outline\n\n")
-            for item in analysis.complete_outline:
-                f.write(f"### {item.topic}\n")
-                if getattr(item, "topic_overview", None):
-                    f.write(f"> {item.topic_overview}\n\n")
-                for st in item.subtopics:
-                    f.write(f"- {st.subtopic}\n")
-                    for det in st.details:
-                        f.write(f"  - {det}\n")
-                f.write("\n")
-
-            f.write("## Video Chapters\n\n")
-            for chapter in analysis.chapters:
-                timestamp = self.format_timestamp(chapter.timestamp_seconds)
-                f.write(f"**{timestamp}** - {chapter.title}\n")
-                if chapter.description:
-                    f.write(f"> {chapter.description}\n")
-                f.write("\n")
-
-            f.write("## Key Takeaways\n\n")
-            for i, takeaway in enumerate(analysis.key_takeaways, 1):
-                f.write(f"{i}. {takeaway}\n")
-
-            if analysis.pull_quotes:
-                f.write("\n## Notable Quotes\n\n")
-                for pq in analysis.pull_quotes:
-                    ts = self.format_timestamp(pq.timestamp_seconds)
-                    for line in pq.pull_quotes:
-                        f.write(f"> [{ts}] \"{line}\"\n\n")
-
+            f.write(markdown_content)
         print(f"📄 Generated markdown report at {markdown_file}")
+
+        # JSON output for programmatic use
+        json_file = output_folder / "video_analysis.json"
+        json_content = json_formatter.format(analysis)
+        with open(json_file, 'w', encoding='utf-8') as f:
+            f.write(json_content)
+        print(f"📄 Generated JSON output at {json_file}")
+
+        # Simple text summary
+        summary_file = output_folder / "video_summary.txt"
+        summary_content = simple_formatter.format(analysis)
+        with open(summary_file, 'w', encoding='utf-8') as f:
+            f.write(summary_content)
+        print(f"📄 Generated simple summary at {summary_file}")
