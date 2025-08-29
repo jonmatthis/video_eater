@@ -1,17 +1,16 @@
 import asyncio
 import json
-import yaml
 import logging
-from dataclasses import dataclass
-from pathlib import Path
-from datetime import timedelta
 import re
-from typing import Optional, Dict, List, Tuple
-from collections import defaultdict
 import time
+from datetime import timedelta
+from pathlib import Path
+from typing import List, Tuple
+
+import yaml
+from pydantic import BaseModel, Field
 
 from video_eater.core.ai_processors.base_processor import BaseAIProcessor
-from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -19,33 +18,59 @@ logger = logging.getLogger(__name__)
 class ChapterHeading(BaseModel):
     timestamp_seconds: float = Field(description="Start time in seconds")
     title: str = Field(description="Chapter title")
-    description: str | None = Field(description="Brief description of what happens in this chapter")
+    description: str = Field(description="Brief description of what happens in this chapter")
+
+
+class PullQuote(BaseModel):
+    timestamp_seconds: float = Field(description="Start time in seconds when the quote was spoken")
+    pull_quotes: list[str] = Field(
+        description="Most impactful, interesting, or otherwise notable pull quotes from the video")
+
+    reason_for_selection: str = Field(description="The reason this quote was selected as a pull quote")
+    context_around_quote: str = Field(description="Brief context around the quote to explain its significance")
+
+
+class SubTopicOutlineItem(BaseModel):
+    subtopic: str = Field(description="Subtopic under a main topic")
+    details: list[str] = Field(description="List of details or points under this subtopic")
+
+
+class TopicOutlineItem(BaseModel):
+    topic: str = Field(description="Main topic")
+    topic_overview: str = Field(description="Brief overview of the main topic")
+    subtopics: list[SubTopicOutlineItem] = Field(description="List of subtopics under this main topic")
 
 
 class ChunkAnalysis(BaseModel):
     summary: str = Field(description="Comprehensive summary of the chunk content")
     key_topics: list[str] = Field(description="list of main topics discussed")
-    topic_outline: dict[str, list[str] | dict[str, object]] = Field(
-        description="Hierarchical outline of topics and subtopics")
+    chunk_outline: list[TopicOutlineItem] = Field(description="Hierarchical outline of topics and subtopics")
     chapters: list[ChapterHeading] = Field(description="Timestamped chapter headings")
-    notable_quotes: list[str] | None = Field(default=None, description="Important or interesting quotes")
+    pull_quotes: list[PullQuote] = Field(
+        description="Most impactful, interesting, or otherwise notable pull quotes from the video")
 
 
 class FullVideoAnalysis(BaseModel):
     executive_summary: str = Field(description="High-level summary of the entire video")
     detailed_summary: str = Field(description="Comprehensive summary with key points")
-    main_topics: list[str] = Field(description="Primary topics covered across the video")
-    complete_outline: dict[str, list[str]] = Field(description="Complete hierarchical topic outline")
+    main_themes: list[str] = Field(description="Primary themes covered across the video")
+    complete_outline: list[TopicOutlineItem] = Field(description="Hierarchical outline of topics and subtopics")
     chapters: list[ChapterHeading] = Field(description="Full video chapter list with adjusted timestamps")
     key_takeaways: list[str] = Field(description="Main insights and conclusions")
-    notable_quotes: list[str] | None = Field(default=None, description="Most impactful quotes from the video")
+    pull_quotes: list[PullQuote] = Field(
+        description="Most impactful, interesting, or otherwise notable pull quotes from the video")
+
+
+async def _return_cached(idx: int, analysis: ChunkAnalysis):
+    """Helper to return cached analysis in async context."""
+    return idx, analysis, None
 
 
 class TranscriptProcessor:
     """Process transcribed chunks to generate summaries, outlines, and chapters."""
 
     def __init__(self,
-                 model: str = "deepseek-chat",
+                 model: str,
                  use_async: bool = True,
                  max_concurrent_chunks: int = 50,
                  batch_size: int = 10,
@@ -117,7 +142,7 @@ class TranscriptProcessor:
                                            transcript_text: str,
                                            chunk_start_seconds: float,
                                            chunk_index: int,
-                                           chunk_name: str) -> Tuple[int, ChunkAnalysis, str]:
+                                           chunk_name: str) -> Tuple[int, ChunkAnalysis, str | None]:
         """Analyze a single chunk with rate limiting via semaphore."""
         async with self._semaphore:
             try:
@@ -140,7 +165,7 @@ class TranscriptProcessor:
                 error_msg = f"Error analyzing chunk {chunk_index}: {str(e)}"
                 print(f"  ❌ Failed chunk {chunk_index + 1}: {e}")
                 self.processing_stats['errors'].append(error_msg)
-                return chunk_index, None, error_msg
+                raise
 
     async def analyze_chunk(self,
                             transcript_text: str,
@@ -156,7 +181,7 @@ class TranscriptProcessor:
         2. Key topics discussed (as a list)
         3. A hierarchical topic outline (topics as keys, subtopics as lists)
         4. Timestamped chapter headings (3-7 chapters, depending on content)
-        5. Notable quotes FROM THE transcript_text that either include important insights, clever/interesting/funny turns of phrase, or both. These must be WORD FOR WORD TRANSCRIPTIONS of things that were said in the video/transcripts
+        5. Pull quotes FROM THE transcript_text that either include important insights, clever/interesting/funny turns of phrase, or both. These must be WORD FOR WORD TRANSCRIPTIONS of things that were said in the video/transcripts
 
         For chapter timestamps, use relative times from the START of this chunk (0 seconds).
         Make chapters meaningful and descriptive, not just "Introduction" or "Conclusion".
@@ -182,10 +207,6 @@ class TranscriptProcessor:
             print(f"Error analyzing chunk {chunk_index}: {e}")
             raise
 
-    async def _return_cached(self, idx: int, analysis: ChunkAnalysis):
-        """Helper to return cached analysis in async context."""
-        return idx, analysis, None
-
     async def process_transcript_batch(self,
                                        batch: List[Tuple[int, Path, float]],
                                        output_folder: Path) -> List[ChunkAnalysis]:
@@ -202,7 +223,7 @@ class TranscriptProcessor:
                 with open(analysis_file, 'r', encoding='utf-8') as f:
                     chunk_analysis = ChunkAnalysis(**yaml.safe_load(f))
                     tasks.append(asyncio.create_task(
-                        self._return_cached(chunk_idx, chunk_analysis)
+                        _return_cached(chunk_idx, chunk_analysis)
                     ))
             else:
                 # Load transcript
@@ -287,7 +308,7 @@ class TranscriptProcessor:
         file_data.sort(key=lambda x: x[0])
 
         # Log calculated timestamps for verification
-        print("📍 Calculated chunk start times:")
+        print("📍 Calculated audio/transcript chunk start times:")
         for chunk_idx, file_path, start_time in file_data[:5]:  # Show first 5
             print(f"   Chunk {chunk_idx}: {self.format_timestamp(start_time)}")
         if len(file_data) > 5:
@@ -303,7 +324,7 @@ class TranscriptProcessor:
             batch = file_data[batch_idx:batch_idx + self.batch_size]
             current_batch_num = batch_idx // self.batch_size + 1
 
-            print(f"\n📋 Processing batch {current_batch_num}/{total_batches} " +
+            print(f"\n📋 Processing Transcript batch {current_batch_num}/{total_batches} " +
                   f"(chunks {batch[0][0]}-{batch[-1][0]})")
 
             batch_analyses = await self.process_transcript_batch(batch, chunk_analysis_output_folder)
@@ -377,11 +398,11 @@ class TranscriptProcessor:
         for analysis in chunk_analyses:
             all_topics.extend(analysis.key_topics)
             all_chapters.extend(analysis.chapters)
-            if analysis.notable_quotes:
-                all_quotes.extend(analysis.notable_quotes[:3] if len(analysis.notable_quotes)>2 else analysis.notable_quotes)
+            if analysis.pull_quotes:
+                all_quotes.extend(analysis.pull_quotes[:3] if len(analysis.pull_quotes) > 2 else analysis.pull_quotes)
 
             # Merge outlines
-            for topic, subtopics in analysis.topic_outline.items():
+            for topic, subtopics in analysis.chunk_outline:
                 if topic in combined_outline:
                     if isinstance(subtopics, list):
                         combined_outline[topic].extend(
@@ -461,10 +482,10 @@ class TranscriptProcessor:
             for takeaway in analysis.key_takeaways:
                 f.write(f"• {takeaway}\n")
 
-            if analysis.notable_quotes:
+            if analysis.pull_quotes:
                 f.write("\n💬 NOTABLE QUOTES\n")
                 f.write("-" * 50 + "\n")
-                for quote in analysis.notable_quotes:
+                for quote in analysis.pull_quotes:
                     f.write(f'"{quote}"\n\n')
 
         print(f"📄 Generated YouTube description at {youtube_file}")
@@ -505,9 +526,9 @@ class TranscriptProcessor:
             for i, takeaway in enumerate(analysis.key_takeaways, 1):
                 f.write(f"{i}. {takeaway}\n")
 
-            if analysis.notable_quotes:
+            if analysis.pull_quotes:
                 f.write("\n## Notable Quotes\n\n")
-                for quote in analysis.notable_quotes:
+                for quote in analysis.pull_quotes:
                     f.write(f"> \"{quote}\"\n\n")
 
         print(f"📄 Generated markdown report at {markdown_file}")

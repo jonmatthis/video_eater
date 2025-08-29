@@ -16,10 +16,6 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
 
 load_dotenv()
-use_deepseek = True
-if use_deepseek:
-    if not os.getenv("DEEPSEEK_API_KEY"):
-        raise EnvironmentError("DEEPSEEK_API_KEY not found in env")
 
 if not os.getenv("OPENAI_API_KEY"):
     raise EnvironmentError("OPENAI_API_KEY not found in env")
@@ -28,20 +24,23 @@ if not os.getenv("OPENAI_API_KEY"):
 class BaseAIProcessor:
     """Base class for AI processors with common functionality."""
 
-    def __init__(self, force_refresh: bool = False, model: str = "deepseek-chat", use_async: bool = True):
+    def __init__(self,  model: str,force_refresh: bool = False, use_async: bool = True):
+        self.use_deepseek = "deepseek" in model
+        if not os.getenv("DEEPSEEK_API_KEY"):
+            raise EnvironmentError("DEEPSEEK_API_KEY not found in env")
 
         self.force_refresh = force_refresh
-        api_url = "https://api.deepseek.com" if use_deepseek else None
+        api_url = "https://api.deepseek.com" if self.use_deepseek else None
         if use_async:
             self.text_client = AsyncOpenAI(
-                api_key=os.getenv("DEEPSEEK_API_KEY") if use_deepseek else os.getenv('OPENAI_API_KEY'),
+                api_key=os.getenv("DEEPSEEK_API_KEY") if self.use_deepseek else os.getenv('OPENAI_API_KEY'),
                 base_url=api_url,
                 timeout=600)
             self.transcription_client = AsyncOpenAI(api_key=os.getenv('OPENAI_API_KEY'),
                                                     timeout=600)
         else:
             self.text_client = OpenAI(
-                api_key=os.getenv("DEEPSEEK_API_KEY") if use_deepseek else os.getenv('OPENAI_API_KEY'),
+                api_key=os.getenv("DEEPSEEK_API_KEY") if self.use_deepseek else os.getenv('OPENAI_API_KEY'),
                 base_url=api_url,
                 timeout=600)
             self.transcription_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'),
@@ -59,7 +58,7 @@ class BaseAIProcessor:
 
         try:
             # Use the parse method with the Pydantic model directly
-            if use_deepseek:
+            if self.use_deepseek:
                 messages[0]['content'] += f"""
                 YOUR RESPONSE MUST MATCH THE FOLLOWING JSON SCHEMA:
                 ==================================

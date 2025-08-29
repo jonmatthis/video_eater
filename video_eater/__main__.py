@@ -50,7 +50,8 @@ class VideoProcessingPipeline:
             'batch_size': 50,
             'chunk_length_seconds': 600,
             'chunk_overlap_seconds': 30,
-            'model': 'deepseek-chat',
+            # 'model': 'deepseek-chat',
+            'model': 'gpt-4.1',
         }
 
         if processing_config:
@@ -259,8 +260,8 @@ class VideoProcessingPipeline:
         print(f"   • {len(full_analysis.main_topics)} main topics identified")
         print(f"   • {len(full_analysis.key_takeaways)} key takeaways extracted")
 
-        if full_analysis.notable_quotes:
-            print(f"   • {len(full_analysis.notable_quotes)} notable quotes collected")
+        if full_analysis.pull_quotes:
+            print(f"   • {len(full_analysis.pull_quotes)} notable quotes collected")
 
         print(f"\n📁 Output Files:")
         print(f"   Location: {self.analysis_folder}")
@@ -374,6 +375,7 @@ if __name__ == "__main__":
         if len(sys.argv) == 1:
             # Default video for testing
             VIDEO_PATH = r"\\jon-nas\jon-nas\videos\livestream_videos\2025-08-14-JSM-Livestream-Skellycam\2025-08-14-JSM-Livestream-Skellycam.mp4"
+            # VIDEO_PATH = r"\\jon-nas\jon-nas\videos\livestream_videos\2025-08-07-JSM-Livestream\2025-08-07-JSM-Livestream-RAW.mp4"
 
             _pipeline = VideoProcessingPipeline(
                 video_path=VIDEO_PATH,
