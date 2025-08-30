@@ -124,10 +124,6 @@ class VideoProcessingPipeline:
             f'{project.video_path.stem}_video_summary.txt': SimpleTextFormatter(),
         }
 
-        # You could also make this configurable in ProcessingConfig
-        if hasattr(self.config, 'output_formats'):
-            # Allow config to override default formatters
-            formatters = self.config.output_formats
 
         output_folder = project.output_folder
         output_folder.mkdir(parents=True, exist_ok=True)
@@ -163,7 +159,5 @@ Processing Statistics:
 - Total duration: {self.stats.total_duration_seconds:.1f}s
 
 Analysis Summary:
-- Chapters: {len(self.analysis.chapters) if self.analysis else 0}
-- Main themes: {len(self.analysis.main_themes) if self.analysis else 0}
-- Key takeaways: {len(self.analysis.key_takeaways) if self.analysis else 0}
+{self.analysis.to_markdown()}
 """

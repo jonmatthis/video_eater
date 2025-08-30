@@ -4,29 +4,73 @@ from pydantic import BaseModel, Field
 class PromptModel(BaseModel):
     pass
 
+
 class ChapterHeading(PromptModel):
-    chapter_start_timestamp_seconds: float = Field(description="Start time in seconds, this MUST MATCH the timestamp from the video transcript PRECISELY")
+    chapter_start_timestamp_seconds: float = Field(
+        description="Start time in seconds, this MUST MATCH the timestamp from the video transcript PRECISELY")
     title: str = Field(description="Chapter title")
     description: str = Field(description="Brief description of what happens in this chapter")
 
+    def __str__(self):
+        hours = int(self.chapter_start_timestamp_seconds // 3600)
+        minutes = int((self.chapter_start_timestamp_seconds % 3600) // 60)
+        seconds = int(self.chapter_start_timestamp_seconds % 60)
+
+        return f"{hours:02}:{minutes:02}:{seconds:02} - {self.title}:\n {self.description}"
 
 
 class PullQuote(PromptModel):
+    starting_timestamp_seconds: float = Field(
+        description="Start time in seconds since recording start, this MUST MATCH the timestamp from the video transcript PRECISELY")
+    ending_timestamp_seconds: float = Field(
+        description="End time in seconds since recording start, this MUST MATCH the timestamp from the video transcript PRECISELY")
     text_content: str = Field(
-        description="The text of the pull quote, as a list of strings (one per line if multiline)")
+        description="The text of the pull quote precisely as spoken in the video transcript, copied verbatim with no changes")
 
     reason_for_selection: str = Field(description="The reason this quote was selected as a pull quote")
     context_around_quote: str = Field(description="Brief context around the quote to explain its significance")
 
+    def __str__(self):
+        output_str = (f"> '{self.text_content}'\n"
+                      f"- **Start:** {self.starting_timestamp_seconds:.2f}s\n"
+                      f"- **End:** {self.ending_timestamp_seconds:.2f}s\n"
+                      f"- **Reason for Selection:** {self.reason_for_selection}\n"
+                      f"- **Context Around Quote:** {self.context_around_quote}\n")
+        return output_str
+
+    @property
+    def as_string_youtube_formatted_timestamp(self) -> str:
+        hours = int(self.starting_timestamp_seconds // 3600)
+        minutes = int((self.starting_timestamp_seconds % 3600) // 60)
+        seconds = int(self.starting_timestamp_seconds % 60)
+
+        return f"{hours:02}:{minutes:02}:{seconds:02} - '{self.text_content}'"
 
 class MostInterestingShortSection(PromptModel):
     """
     Model representing a particularly interesting or noteworthy 60-ish-second clip from the video, e.g.
     the part of this section that would be the best candidate for a standalone short video clip for tiktok, youtube shorts, instagram reels, etc.
     """
-    text_content: str = Field(description="The text content from the clip, copied verbatim with no changes precisely as spoken in the video")
+    starting_timestamp_seconds: float = Field(
+        description="Start time in seconds since recording start, this MUST MATCH the timestamp from the video transcript PRECISELY")
+    ending_timestamp_seconds: float = Field(
+        description="End time in seconds since recording start, this MUST MATCH the timestamp from the video transcript PRECISELY")
+    text_content: str = Field(
+        description="The text of the pull quote precisely as spoken in the video transcript, copied VERBATIM AND IN FULL  with no changes")
     reason_for_selection: str = Field(description="The reason this clip was selected as particularly interesting")
     context_around_clip: str = Field("Brief context around the clip to explain its significance")
+    target_audience: str = Field(
+        description="The ideal target audience for this clip, e.g. 'beginners interested in machine learning', 'advanced practitioners in neural networks', 'general audience interested in science', etc.")
+
+    def __str__(self):
+        output_str = (f">'{self.text_content}'\n"
+                      f"- **Start:** {self.starting_timestamp_seconds:.2f}s\n"
+                      f"- **End:** {self.ending_timestamp_seconds:.2f}s\n"
+                      f"- **Target Audience:** {self.target_audience}\n"
+                      f"- **Reason for Selection:** {self.reason_for_selection}\n"                      
+                      f"- **Context Around Clip:** {self.context_around_clip}\n")
+
+        return output_str
 
 
 class SubTopicOutlineItem(PromptModel):
@@ -44,12 +88,11 @@ class TopicOutlineItem(PromptModel):
     subtopics: list[SubTopicOutlineItem] = Field(description="List of subtopics under this main topic")
 
     def __str__(self):
-        subtopics_str = "\n".join(str(subtopic) for subtopic in self.subtopics)
-        return f"### {self.topic}\n> {self.topic_overview}\n{subtopics_str}"
+        subtopics_str = "\n\n".join(str(subtopic) for subtopic in self.subtopics)
+        return f"### {self.topic}\n> {self.topic_overview}\n{subtopics_str}\n"
 
 
-
-class SummaryGeneration(PromptModel):
+class TranscriptSummaryPromptModel(PromptModel):
     """
     Model for generating Summaries and Outlines
 
@@ -59,63 +102,198 @@ class SummaryGeneration(PromptModel):
 
     It is imperative to work as closely as possible to the provided material, using the EXACT and SPECIFIC wording and terminology from the transcript whenever possible.
     """
+    transcript_title: str = Field(
+        description="The a descriptive title of the transcript, will be used as the H1 header, the filename slug, and the URL slug. "
+                    "It should be short (only a few words) and provide a terse preview of the basic content of the full transcript, it should include NO colons")
+    transcript_title_slug: str = Field(
+        description="The a descriptive title of the transcript, will be used as the H1 header, the filename slug, and the URL slug. "
+                    "It should be short (only a few words) and provide a terse preview of the basic content of the full transcript, it should include NO colons")
 
+    one_sentence_summary: str = Field(
+        description="A single sentence summary of the content of the transcript. This should be a concise summary that captures the main points and themes of the transcript.")
     executive_summary: str = Field(description="3-5 sentence high-level summary capturing the essence of the video")
 
     topics_detailed_summary: str = Field(
         description="Detailed summary organized by main topics, covering all key points and topics discussed in the video in detail organized in a logical way, not necessarily in the order they were presented"
     )
-    complete_topic_outline: list[TopicOutlineItem] = Field(
+    covered_topics_outline: list[TopicOutlineItem] = Field(
         description="Hierarchical outline combining all chunk outlines, organized logically with 5-10 main topics"
     )
-    chronological_description: str = Field(
-        description="Detailed chronological description of the video, covering all the key moments and topics in the video described with great specificity and detail in the order they were presented")
+    @property
+    def formatted_title(self) -> str:
+        title_str = (f"# {self.transcript_title} \n\n"
+                    f"Title slug: {self.transcript_title_slug}\n\n")
+        return title_str
 
-    complete_chronological_outline: str = Field(
-        description="Comprehensive outline combining all chunk outlines in chronological order, covering all key points as they were presented in the video"
-    )
+    @property
+    def formatted_content(self) -> str:
+        content_str = (f"## One Sentence Summary\n{self.one_sentence_summary}\n\n"
+                      f"## Executive Summary\n{self.executive_summary}\n\n"
+                      f"## Topics Detailed Summary\n{self.topics_detailed_summary}\n\n"
+                      f"## Complete Topic Outline\n" + "\n".join(
+            str(item) for item in self.covered_topics_outline) + "\n\n")
+        return content_str
 
+    def __str__(self):
+        return f"{self.formatted_title}\n{self.formatted_content}"
+
+
+
+class TopicAreaPromptModel(BaseModel):
+    name: str = Field(
+        description="The name of this topic area. This should be a single word or hyphenated phrase that describes the topic area. For example, 'machine-learning', 'python', 'oculomotor-control', 'neural-networks', 'computer-vision', etc. Do not include conversational aspects such as 'greetings', 'farewells', 'thanks', etc.")
+    category: str = Field(
+        description="The general category or field of interest (e.g., 'science', 'technology', 'arts', 'activities', 'health', etc).")
+    subject: str = Field(
+        description="A more specific subject or area of interest within the category (e.g., 'biology', 'computer science', 'music', 'sports', 'medicine', etc).")
+    topic: str = Field(
+        description="More specific topic or subfield within the category (e.g., 'neuroscience', 'machine learning',  'classical music', 'basketball', 'cardiology', etc).")
+    subtopic: str = Field(
+        description="An even more specific subtopic or area of interest within the topic (e.g., 'oculomotor-control', 'neural-networks', 'Baroque music', 'NBA', 'heart surgery', etc).")
+    niche: str = Field(
+        description="A very specific niche or focus area within the subtopic (e.g., 'gaze-stabilization', 'convolutional-neural-networks', 'Bach', 'NBA playoffs', 'pediatric cardiology', etc).")
+    description: str = Field(
+        description="A brief description of this interest, including any relevant background information, key concepts, notable figures, recent developments, and related topics. This should be a concise summary that provides context and depth to the interest")
+
+    def __str__(self):
+        return f"**{self.name}**\n ({self.category} > {self.subject} > {self.topic} > {self.subtopic} > {self.niche}):\n {self.description}"
+
+class ThemesAndTakeawaysPromptModel(PromptModel):
     main_themes: list[str] = Field(
-        description="5-8 primary themes covered across the video, listed in order of priority or emphasis"
+        description="5-8 primary themes covered across the video transcript, listed in order of priority or emphasis"
     )
     key_takeaways: list[str] = Field(
-        description="5-10 main insights and conclusions from the video, summarized as concise bullet points and listed in order of importance"
+        description="5-10 main insights and conclusions from the video transcript, summarized as concise bullet points and listed in order of importance"
     )
+    topic_areas: list[TopicAreaPromptModel] = Field(
+        description="A list of topic areas that describe the content of the transcript. These will be used to categorize the transcript within a larger collection of texts. Ignore conversational aspects (such as 'greetings', 'farewells', 'thanks', etc.).  These should almost always be single word, unless the tag is a multi-word phrase that is commonly used as a single tag, in which case it should be hyphenated. For example, 'machine-learning, python, oculomotor-control,neural-networks, computer-vision', but NEVER things like 'computer-vision-conversation', 'computer-vision-questions', etc.")
 
     def __str__(self):
-        topics_outline_str = "\n".join(str(item) for item in self.complete_topic_outline)
-        return (f"## Executive Summary\n{self.executive_summary}\n\n"
-                f"## Topic Summaries\n{self.topics_detailed_summary}\n\n"
-                f"## Chronological Description\n{self.chronological_description}\n\n"
-                f"## Complete Topic Outline\n{topics_outline_str}\n\n"
-                f"## Complete Chronological Outline\n{self.complete_chronological_outline}\n\n"
-                f"## Main Themes\n" + "\n".join(f"- {theme}" for theme in self.main_themes) + "\n\n"
-                f"## Key Takeaways\n" + "\n".join(f"- {takeaway}" for takeaway in self.key_takeaways)
-               )
+        output_str = (f"## Main Themes\n" + "\n".join(f"- {theme}" for theme in self.main_themes) + "\n\n" +
+                        f"## Key Takeaways\n" + "\n".join(f"- {takeaway}" for takeaway in self.key_takeaways) + "\n\n" +
+                        f"## Topic Areas\n" + "\n".join(str(area) for area in self.topic_areas) + "\n\n"
+                        )
+        return output_str
+
+class PullQuotesSelectionPromptModel(PromptModel):
+    pull_quotes: list[PullQuote] = Field(
+        description="A list of 5-10 of the most most impactful, interesting, or otherwise notable pull quotes from the video transcript - ORDERED IN TERMS OF QUALITY WITH THE BEST QUOTE FIRST")
+
+    def __str__(self):
+        output_str = (f"## Pull Quotes\n" + "\n".join(str(quote) for quote in self.pull_quotes) + "\n\n"
+                      )
+        return output_str
+
+class MostInterestingShortSectionSelectionPromptModel(PromptModel):
+    most_interesting_short_section_candidates: list[MostInterestingShortSection] = Field(
+        description="A list of 3-5 particularly interesting or noteworthy 60-ish-second clips from the video that we should consider clipping out for use on social media, e.g. the part of this section that would be the best candidate for a standalone short video clip for tiktok, youtube shorts, instagram reels, etc. - ORDERED IN TERMS OF QUALITY WITH THE BEST CLIP FIRST")
+    def __str__(self):
+        output_str = (f"## Most Interesting Short Sections\n" + "\n".join(str(section) for section in self.most_interesting_short_section_candidates) + "\n\n"
+                      )
+        return output_str
 
 class ChunkAnalysis(PromptModel):
-    summary: SummaryGeneration
+    summary: TranscriptSummaryPromptModel = Field(description="Comprehensive summary of this chunk of the video")
+    main_themes: list[str] = Field(
+        description="5-8 primary themes covered across the video transcript, listed in order of priority or emphasis"
+    )
+    key_takeaways: list[str] = Field(
+        description="5-10 main insights and conclusions from the video transcript, summarized as concise bullet points and listed in order of importance"
+    )
+    topic_areas: list[TopicAreaPromptModel] = Field(
+        description="A list of topic areas that describe the content of the transcript. These will be used to categorize the transcript within a larger collection of texts. Ignore conversational aspects (such as 'greetings', 'farewells', 'thanks', etc.).  These should almost always be single word, unless the tag is a multi-word phrase that is commonly used as a single tag, in which case it should be hyphenated. For example, 'machine-learning, python, oculomotor-control,neural-networks, computer-vision', but NEVER things like 'computer-vision-conversation', 'computer-vision-questions', etc.")
+
     pull_quotes: list[PullQuote] = Field(
-        description="Most impactful, interesting, or otherwise notable pull quotes from the video")
+        description="Most impactful, interesting, or otherwise notable pull quotes from the video transcript")
     most_interesting_short_section: MostInterestingShortSection = Field(
-        description="Particularly interesting or noteworthy section of this chunk, e.g. the part of this section that would be the best candidate for a standalone short video clip for tiktok, youtube shorts, instagram reels, etc."
+        description="Particularly interesting or noteworthy section of this chunk, e.g. the part of this section that would be the best candidate for a standalone short video transcript clip for tiktok, youtube shorts, instagram reels, etc."
     )
+
     def __str__(self):
-        return (f"## Summary\n{self.summary}\n\n"
-                f"## Pull Quotes\n" + "\n".join(f"- \"{quote.text_content}\" (Reason: {quote.reason_for_selection})" for quote in self.pull_quotes) + "\n\n"
-                f"## Most Interesting Short Section\n- \"{self.most_interesting_short_section.text_content}\" (Reason: {self.most_interesting_short_section.reason_for_selection})"
-               )
+        output_str = (f"## Chunk Summary\n{self.summary}\n\n"
+                      f"## Main Themes\n" + "\n".join(f"- {theme}" for theme in self.main_themes) + "\n\n"
+                                                                                                    f"## Key Takeaways\n" + "\n".join(
+            f"- {takeaway}" for takeaway in self.key_takeaways) + "\n\n"
+                                                                  f"## Topic Areas\n" + "\n".join(
+            str(area) for area in self.topic_areas) + "\n\n"
+                                                      f"## Pull Quotes\n" + "\n".join(
+            str(quote) for quote in self.pull_quotes) + "\n\n"
+                                                        f"## Most Interesting Short Section\n" + str(
+            self.most_interesting_short_section) + "\n\n"
+                      )
+        return output_str
 
-class ClipSelection(PromptModel):
-    """Model for selecting top 60-second clips"""
-    top_clips: list[MostInterestingShortSection] = Field(
-        description="The most interesting or noteworthy short clips from the video"
-    )
+class ChunkAnalysisWithTimestamp(ChunkAnalysis):
+    starting_timestamp_string: str  # e.g. "123.45" for a chunk starting at 123.45 seconds - to match with filename
 
-class FullVideoAnalysis(PromptModel):
-    summary: SummaryGeneration = Field(description="Comprehensive summary of the entire video")
-    chunk_analyses: list[ChunkAnalysis] = Field(description="List of analyses for each chunk of the video")
-    pull_quotes: list[PullQuote] = Field(
-        description="Most impactful, interesting, or otherwise notable pull quotes from the video")
-    most_interesting_clips: list[MostInterestingShortSection] = Field(
-        description="Particularly interesting or noteworthy short clips from the video")
+    @property
+    def as_chapter_heading(self) -> str:
+        return str(ChapterHeading(
+            chapter_start_timestamp_seconds=float(self.starting_timestamp_string),
+            title=self.summary.transcript_title,
+            description=self.summary.one_sentence_summary
+        ))
+
+StartingTimeString = str  # e.g. "123.45" for a chunk starting at 123.45 seconds
+
+class FullVideoAnalysis(BaseModel):
+    summary: TranscriptSummaryPromptModel
+    chunk_analyses: list[ChunkAnalysisWithTimestamp]
+    themes: list[str]
+    topics: list[TopicAreaPromptModel]
+    takeaways: list[str]
+    pull_quotes: list[PullQuote]
+    most_interesting_clips: list[MostInterestingShortSection]
+
+    def trim(self):
+        """
+        Remove one element based on a general heuristic to reduce size.
+
+        intendended to be used iteratively until the model/string output fits within a particular limit
+
+        Checks the length of each NON-chunk-analysis list and removes one element from the longest list.
+        """
+        if len(self.most_interesting_clips) > 1: # Always keep at least one clip
+            self.most_interesting_clips.pop()
+            return
+
+        if len(self.pull_quotes) > 3:
+            self.pull_quotes.pop()
+            return
+
+        lists = {
+            'themes': self.themes,
+            'topics': self.topics,
+            'takeaways': self.takeaways,
+        }
+        longest_list_name = max(lists, key=lambda k: len(lists[k]))
+        if lists[longest_list_name]:
+            lists[longest_list_name].pop()
+
+
+    def to_markdown(self, disclaimer_text:str|None=None) -> str:
+        title_string = self.summary.formatted_title
+        summary_content_string = self.summary.formatted_content
+        themes_string = "## Overall Main Themes\n" + "\n".join(f"- {theme}" for theme in self.themes) + "\n\n"
+        takeaways_string = "## Overall Key Takeaways\n" + "\n".join(f"- {takeaway}" for takeaway in self.takeaways) + "\n\n"
+        topics_string = "## Overall Topic Areas\n" + "\n".join(str(area) for area in self.topics) + "\n\n"
+        pull_quotes_string = "## Overall Pull Quotes\n" + "\n".join(str(quote) for quote in self.pull_quotes) + "\n\n"
+        most_interesting_clips_string = "## Overall Most Interesting Short Sections\n" + "\n".join(
+            str(clip) for clip in self.most_interesting_clips) + "\n\n"
+
+        chunk_analyses_string = "\n".join(
+            f"\\n\\n------------------------TRANSCRIPT CHUNK ANALYSES------------------------n\n\n### Analysis for Chunk Starting at {chunk.starting_timestamp_string} seconds\n\n{str(chunk)}"
+            for chunk in self.chunk_analyses
+        )
+        return (f"{title_string}\n\n"                
+                f"{disclaimer_text}\n\n" if disclaimer_text else ""
+                f"{summary_content_string}\n\n"
+                f"{themes_string}\n\n"
+                f"{takeaways_string}\n\n"
+                f"{topics_string}\n\n"
+                f"{pull_quotes_string}\n\n"
+                f"{most_interesting_clips_string}\n\n"
+                f"{chunk_analyses_string}\n\n"
+                )
+
+
