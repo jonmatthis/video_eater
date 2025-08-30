@@ -29,7 +29,7 @@ class VideoProcessingPipeline:
 
         # Each step is now clean and focused
         audio_chunks = await self._extract_audio(project)
-        transcripts = await self._transcribe_chunks(project, audio_chunks)
+        transcripts = await self._transcribe_chunks(project)
         analysis = await self._analyze_transcripts(project, transcripts)
         output_files = await self._generate_outputs(project, analysis)
         return PipelineResult(
@@ -65,7 +65,7 @@ class VideoProcessingPipeline:
 
         return chunks
 
-    async def _transcribe_chunks(self, project: VideoProject, audio_chunks):
+    async def _transcribe_chunks(self, project: VideoProject):
         """Transcribe audio chunks and return transcripts."""
         project.transcript_chunks_folder.mkdir(parents=True, exist_ok=True)
 
@@ -105,6 +105,7 @@ class VideoProcessingPipeline:
         analysis = await processor.process_transcript_folder(
             transcript_folder=project.transcript_chunks_folder,
             chunk_analysis_output_folder=project.analysis_folder,
+            full_output_folder=project.output_folder
         )
 
         self.stats.analyses_created = processor.processing_stats.get('chunks_processed', 0)

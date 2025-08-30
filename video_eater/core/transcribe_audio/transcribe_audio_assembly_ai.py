@@ -1,5 +1,6 @@
 # Simple AssemblyAI transcription function
 import asyncio
+from pathlib import Path
 
 from video_eater.core.transcribe_audio.transcript_models import VideoTranscript
 
@@ -39,9 +40,8 @@ async def async_transcribe_with_assemblyai(audio_file_path: str, api_key: str) -
     # Check for errors
     if transcript.status == "error":
         raise RuntimeError(f"Transcription failed: {transcript.error}")
-
+    chunk_start_time = float(Path(audio_file_path).stem.split("__")[-1].replace("sec", ""))
     # Return transcription result
-    return VideoTranscript.from_assembly_ai_output({
-        "text": transcript.text,
-        "paragraphs":transcript.get_paragraphs()
-    })
+    return VideoTranscript.from_assembly_ai_output(
+        start_time = chunk_start_time,
+        transcript=transcript)

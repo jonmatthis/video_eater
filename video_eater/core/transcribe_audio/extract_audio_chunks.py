@@ -41,7 +41,7 @@ def extract_audio_from_video(
 
     Args:
         video_file: Path to the input video file
-        audio_output_file: Path to save the extracted audio (defaults to video filename with .mp3 extension)
+        audio_output_file: Path to save the extracted audio (defaults to video filename with .wav extension)
         chunk_audio: Whether to split the audio into chunks
         audio_chunk_folder: Folder to save audio chunks
         chunk_length_seconds: Length of each chunk in seconds
@@ -50,20 +50,19 @@ def extract_audio_from_video(
     Returns:
         Tuple of (path to extracted audio file, list of chunk file paths)
     """
-    # If output file is not specified, create one based on input filename
+    # If output file is not specified, create one based on input filename with .wav extension
     if audio_output_file is None:
-        audio_output_file = video_file.replace(Path(video_file).suffix, ".mp3")
+        audio_output_file = video_file.replace(Path(video_file).suffix, ".wav")
 
     if not Path(audio_output_file).is_file():
-        # Use ffmpeg directly for audio extraction - much simpler and more reliable
+        # Use ffmpeg directly for audio extraction - save as WAV format
         cmd = [
             "ffmpeg",
             "-i",
             video_file,
-            "-q:a",
-            "0",  # Use highest quality
-            "-map",
-            "a",  # Extract only audio
+            "-vn",  # Disable video
+            "-ac", "1",  # Set audio channels to 1 (mono)
+            "-ar", "16000",  # Set audio sample rate to 16kHz
             "-y",  # Overwrite output file if it exists
             audio_output_file,
         ]
@@ -71,7 +70,7 @@ def extract_audio_from_video(
         print(f"Extracting audio from {Path(video_file).name} to {audio_output_file}")
         subprocess.run(cmd, check=True)
 
-    # Chunk the audio if requested
+    # Chunk the audio if requested (chunks will still be MP3)
     chunk_files = []
     if chunk_audio:
         if audio_chunk_folder is not None:
@@ -134,7 +133,7 @@ def chunk_audio_file(
     # Handle short videos: if duration is less than or equal to chunk_length, create single chunk
     if duration <= chunk_length_seconds:
         print(f"Audio duration ({duration:.1f}s) <= chunk length ({chunk_length_seconds}s), creating single chunk")
-        chunk_filename = f"{base_name}_chunk_000_00h-00m-00sec.mp3"
+        chunk_filename = f"{base_name}_chunk_000__00.00sec.mp3"
         chunk_path = str(Path(audio_chunk_folder) / chunk_filename)
 
         # Extract the entire audio as a single chunk
@@ -179,13 +178,8 @@ def chunk_audio_file(
             # Regular chunk
             end_time = min(start_time + chunk_length_seconds, duration)
 
-        # Format time for filename
-        hours = int(start_time // 3600)
-        minutes = int((start_time % 3600) // 60)
-        seconds = int(start_time % 60)
-
         # Create output filename
-        chunk_filename = f"{base_name}_chunk_{i:03d}_{hours:02d}h-{minutes:02d}m-{seconds:02d}sec.mp3"
+        chunk_filename = f"{base_name}_chunk_{i:03d}__{start_time:.1f}sec.mp3"
         chunk_path = str(Path(audio_chunk_folder) / chunk_filename)
 
         chunk_tasks.append((input_file, start_time, end_time, chunk_path))

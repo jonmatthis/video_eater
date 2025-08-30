@@ -3,11 +3,13 @@ from typing import Protocol
 
 from jinja2 import Template
 
+from video_eater.core.ai_processors.ai_prompt_models import PromptModel, FullVideoAnalysis
+
 
 class OutputFormatter(Protocol):
     """Protocol for output formatters."""
 
-    def format(self, analysis: 'FullVideoAnalysis') -> str:
+    def format(self, analysis: PromptModel) -> str:
         ...
 
 
@@ -15,14 +17,14 @@ class YouTubeDescriptionFormatter:
     """Format analysis for YouTube descriptions."""
 
     template = Template("""📝 VIDEO SUMMARY
-{{ '=' * 50 }}
+(AI generated summary - expect wonkiness. Generated code available here: https://github.com/jonmatthis/video_eater)
 
-{{ analysis.executive_summary }}
+{{ analysis.detailed_summary }}
 
 📚 CHAPTERS
 {{ '-' * 50 }}
 {% for chapter in analysis.chapters %}
-{{ format_timestamp(chapter.timestamp_seconds) }} - {{ chapter.title }}
+{{ format_timestamp(chapter.chapter_start_timestamp_seconds) }} - {{ chapter.title }}
 {% if chapter.description %}   {{ chapter.description }}{% endif %}
 {% endfor %}
 
@@ -48,11 +50,10 @@ class YouTubeDescriptionFormatter:
         minutes = int((seconds % 3600) // 60)
         secs = int(seconds % 60)
 
-        if hours > 0:
-            return f"{hours:02d}:{minutes:02d}:{secs:02d}"
-        return f"{minutes:02d}:{secs:02d}"
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
-    def format(self, analysis) -> str:
+
+    def format(self, analysis:FullVideoAnalysis) -> str:
         return self.template.render(
             analysis=analysis,
             format_timestamp=self.format_timestamp
@@ -86,7 +87,7 @@ class MarkdownReportFormatter:
 {% endfor %}
 ## Video Chapters
 {% for chapter in analysis.chapters %}
-**{{ format_timestamp(chapter.timestamp_seconds) }}** - {{ chapter.title }}
+**{{ format_timestamp(chapter.chapter_start_timestamp_seconds) }}** - {{ chapter.title }}
 {% if chapter.description %}
 > {{ chapter.description }}
 {% endif %}

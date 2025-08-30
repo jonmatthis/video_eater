@@ -9,10 +9,11 @@ from typing import List, Tuple
 
 import yaml
 
-from video_eater.core.ai_processors.ai_prompt_models import ChunkAnalysis, FullVideoAnalysis
+from video_eater.core.ai_processors.ai_prompt_models import ChunkAnalysis, FullVideoAnalysis, SummaryGeneration,  ClipSelection
 from video_eater.core.ai_processors.base_processor import BaseAIProcessor
 from video_eater.core.output_templates import YouTubeDescriptionFormatter, JsonFormatter, MarkdownReportFormatter, \
     SimpleTextFormatter
+from video_eater.core.transcribe_audio.transcript_models import VideoTranscript
 
 logger = logging.getLogger(__name__)
 
@@ -48,42 +49,26 @@ class TranscriptProcessor:
 
     @staticmethod
     def format_timestamp(seconds: float) -> str:
-        """Convert seconds to YouTube-style timestamp (HH:MM:SS or MM:SS)."""
+        """Convert seconds to YouTube-style timestamp (HH:MM:SS)."""
         td = timedelta(seconds=seconds)
         total_seconds = int(td.total_seconds())
         hours = total_seconds // 3600
         minutes = (total_seconds % 3600) // 60
         seconds = total_seconds % 60
 
-        if hours > 0:
-            return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-        else:
-            return f"{minutes:02d}:{seconds:02d}"
-
-    def calculate_chunk_start_time(self, chunk_index: int) -> float:
-        """Calculate the actual start time of a chunk accounting for overlap."""
-        # First chunk starts at 0
-        if chunk_index == 0:
-            return 0.0
-
-        # Subsequent chunks start at (chunk_length - overlap) * index
-        effective_chunk_duration = self.chunk_length_seconds - self.chunk_overlap_seconds
-        return chunk_index * effective_chunk_duration
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
     @staticmethod
     def parse_chunk_filename(filename: str) -> Tuple[int, float]:
         """Extract chunk index and start time from chunk filename.
         Returns: (chunk_index, start_time_seconds)
         """
-        # Try to match chunk_INDEX_Xh-Ym-Zsec pattern
-        pattern = r"chunk_(\d+)_(\d+)h-(\d+)m-(\d+)sec"
+        # Match the actual format: *_chunk_XXX__YYY.Ysec* where XXX is the index and YYY.Y is the start time
+        pattern = r"chunk_(\d{3})__(\d+(?:\.\d+)?)sec"
         match = re.search(pattern, filename)
         if match:
             chunk_index = int(match.group(1))
-            hours = int(match.group(2))
-            minutes = int(match.group(3))
-            seconds = int(match.group(4))
-            start_time = hours * 3600 + minutes * 60 + seconds
+            start_time = float(match.group(2))
             return chunk_index, start_time
 
         # Fallback: try to get just the chunk index
@@ -95,8 +80,7 @@ class TranscriptProcessor:
         return 0, 0.0
 
     async def analyze_chunk_with_semaphore(self,
-                                           transcript_text: str,
-                                           chunk_start_seconds: float,
+                                           transcript_data: VideoTranscript,
                                            chunk_index: int,
                                            chunk_name: str) -> Tuple[int, ChunkAnalysis, str | None]:
         """Analyze a single chunk with rate limiting via semaphore."""
@@ -104,11 +88,10 @@ class TranscriptProcessor:
             try:
                 start_time = time.time()
                 print(
-                    f"  📝 Processing chunk {chunk_index + 1}: {chunk_name} (starts at {self.format_timestamp(chunk_start_seconds)})")
+                    f"  📝 Processing chunk {chunk_index + 1}: {chunk_name} (starts at {self.format_timestamp(transcript_data.start_time)})")
 
                 analysis = await self.analyze_chunk(
-                    transcript_text=transcript_text,
-                    chunk_start_seconds=chunk_start_seconds,
+                    transcript_data=transcript_data,
                     chunk_index=chunk_index
                 )
 
@@ -124,32 +107,21 @@ class TranscriptProcessor:
                 raise
 
     async def analyze_chunk(self,
-                            transcript_text: str,
-                            chunk_start_seconds: float = 0,
+                            transcript_data: VideoTranscript,
                             chunk_index: int = 0) -> ChunkAnalysis:
         """Analyze a single transcript chunk."""
 
         system_prompt = f"""You are analyzing a transcript chunk from a longer video. 
-        This is chunk #{chunk_index} starting at {self.format_timestamp(chunk_start_seconds)} in the video.
+        This is chunk #{chunk_index} starting at {self.format_timestamp(transcript_data.start_time)} in the video.
 
-        Please provide:
-        1. A comprehensive summary of this chunk
-        2. Key topics discussed (as a list)
-        3. A hierarchical topic outline using this schema:
-           - chunk_outline: list of TopicOutlineItem objects, each with:
-             • topic (string)
-             • topic_overview (string)
-             • subtopics: list of SubTopicOutlineItem objects, each with:
-               – subtopic (string)
-               – details (list of strings)
-        4. Timestamped chapter headings (3-7 chapters, depending on content)
-        5. Pull quotes FROM THE transcript_text that either include important insights, clever/interesting/funny turns of phrase, or both. These must be WORD FOR WORD TRANSCRIPTIONS of things that were said in the video/transcripts
-
-        For chapter timestamps, use relative times from the START of this chunk (0 seconds).
-        Make chapters meaningful and descriptive, not just "Introduction" or "Conclusion".
-
-        Transcript:
-        {transcript_text}
+       <<<Transcript-START>>>
+        {transcript_data.full_transcript}
+        <<<Transcript-END>>>
+        
+        Use this information and provie your answer in JSON format according to the provided schema. 
+        
+        You must use the information from the transcript to fill in the fields as accurately as possible, in effect to best
+        summarize and outline the content of this chunk of the video. Ensure precise and careful copying of the direct quotes.
         """
 
         try:
@@ -159,10 +131,6 @@ class TranscriptProcessor:
                 output_model=ChunkAnalysis
             )
 
-            # Adjust timestamps to account for chunk start time
-            for chapter in response.chapters:
-                chapter.timestamp_seconds += chunk_start_seconds
-
             return response
 
         except Exception as e:
@@ -170,12 +138,12 @@ class TranscriptProcessor:
             raise
 
     async def process_transcript_batch(self,
-                                       batch: List[Tuple[int, Path, float]],
+                                       batch: List[Tuple[int, Path]],
                                        output_folder: Path) -> List[ChunkAnalysis]:
         """Process a batch of transcript files in parallel."""
         tasks = []
 
-        for batch_idx, (chunk_idx, transcript_file, chunk_start) in enumerate(batch):
+        for batch_idx, (chunk_idx, transcript_file) in enumerate(batch):
             # Check if analysis already exists
             analysis_file = output_folder / f"{transcript_file.stem}.analysis.yaml"
 
@@ -190,19 +158,14 @@ class TranscriptProcessor:
             else:
                 # Load transcript
                 with open(transcript_file, 'r', encoding='utf-8') as f:
-                    transcript_data = json.load(f)
+                    transcript_data = VideoTranscript(**json.load(f))
 
-                # Extract text
-                if isinstance(transcript_data, dict):
-                    transcript_text = transcript_data['full_transcript']
-                else:
-                    transcript_text = str(transcript_data)
+
 
                 # Create analysis task
                 task = asyncio.create_task(
                     self.analyze_chunk_with_semaphore(
-                        transcript_text=transcript_text,
-                        chunk_start_seconds=chunk_start,
+                        transcript_data=transcript_data,
                         chunk_index=chunk_idx,
                         chunk_name=transcript_file.name
                     )
@@ -241,10 +204,11 @@ class TranscriptProcessor:
 
     async def process_transcript_folder(self,
                                         transcript_folder: Path,
-                                        chunk_analysis_output_folder: Path) -> FullVideoAnalysis:
+                                        chunk_analysis_output_folder: Path,
+                                        full_output_folder:Path) -> FullVideoAnalysis:
         """Process all transcript chunks in a folder with parallel processing."""
 
-        start_time = time.time()
+        start_time = time.perf_counter()
 
         chunk_analysis_output_folder.mkdir(parents=True, exist_ok=True)
 
@@ -262,21 +226,11 @@ class TranscriptProcessor:
         file_data = []
         for transcript_file in transcript_files:
             chunk_index, _ = self.parse_chunk_filename(transcript_file.name)
-            # Calculate actual start time based on chunk index and overlap
-            chunk_start = self.calculate_chunk_start_time(chunk_index)
-            file_data.append((chunk_index, transcript_file, chunk_start))
+            file_data.append((chunk_index, transcript_file))
 
         # Sort by chunk index to ensure proper ordering
         file_data.sort(key=lambda x: x[0])
 
-        # Log calculated timestamps for verification
-        print("📍 Calculated audio/transcript chunk start times:")
-        for chunk_idx, file_path, start_time in file_data[:5]:  # Show first 5
-            print(f"   Chunk {chunk_idx}: {self.format_timestamp(start_time)}")
-        if len(file_data) > 5:
-            last_chunk = file_data[-1]
-            print(f"   ...")
-            print(f"   Chunk {last_chunk[0]}: {self.format_timestamp(last_chunk[2])}")
 
         # Process in batches
         all_chunk_analyses = []
@@ -295,7 +249,7 @@ class TranscriptProcessor:
             print(f"✅ Batch {current_batch_num} complete")
 
         # Print processing statistics
-        elapsed = time.time() - start_time
+        elapsed = time.perf_counter() - start_time
         print(f"\n📊 Processing Statistics:")
         print(f"  • Total time: {elapsed:.1f}s")
         print(f"  • Chunks processed: {self.processing_stats['chunks_processed']}")
@@ -323,8 +277,9 @@ class TranscriptProcessor:
                       allow_unicode=True)
         print(f"💾 Saved combined analysis to {combined_file}")
 
-        # Generate formatted outputs
-        await self.generate_formatted_outputs(full_analysis, chunk_analysis_output_folder.parent)
+        # # Generate formatted outputs
+        # await self.generate_formatted_outputs(full_analysis,
+        #                                         output_folder=full_output_folder)
 
         return full_analysis
 
@@ -336,109 +291,168 @@ class TranscriptProcessor:
         cleaned_chapters = []
         last_timestamp = -1
 
-        for chapter in sorted(analysis.chapters, key=lambda x: x.timestamp_seconds):
+        for chapter in sorted(analysis.chapters, key=lambda x: x.chapter_start_timestamp_seconds):
             # Skip chapters that are too close to the previous one (within overlap window)
-            if chapter.timestamp_seconds > last_timestamp + 5:  # 5 second minimum gap
+            if chapter.chapter_start_timestamp_seconds > last_timestamp + 5:  # 5 second minimum gap
                 cleaned_chapters.append(chapter)
-                last_timestamp = chapter.timestamp_seconds
+                last_timestamp = chapter.chapter_start_timestamp_seconds
 
         analysis.chapters = cleaned_chapters
         return analysis
 
     async def combine_analyses(self,
-                               chunk_analyses: list[ChunkAnalysis],
-                               video_title: str | None = None) -> FullVideoAnalysis:
+                               chunk_analyses: list[ChunkAnalysis]) -> FullVideoAnalysis:
+        pass
         """Combine individual chunk analyses into a complete video analysis."""
 
-        # Prepare data for combination
-        all_summaries = [analysis.summary for analysis in chunk_analyses]
+        # Stage 1: Aggregate all data from chunks
+        all_summaries = []
         all_topics = []
         all_chapters = []
-        all_quotes = []
-        combined_outline = {}
-        # Combined outline structure: {topic: {"topic_overview": str, "subtopics": {subtopic: set(details)}}}
+        all_pull_quotes = []
+        all_clips = []
+        all_outlines = []
 
-        for analysis in chunk_analyses:
-            all_topics.extend(analysis.key_topics)
-            all_chapters.extend(analysis.chapters)
-            if analysis.pull_quotes:
-                all_quotes.extend(analysis.pull_quotes[:3] if len(analysis.pull_quotes) > 2 else analysis.pull_quotes)
+        for chunk in chunk_analyses:
+            all_summaries.append(chunk.summary)
+            all_topics.extend(chunk.key_topics)
+            all_chapters.extend(chunk.chapters)
+            all_pull_quotes.extend(chunk.pull_quotes)
+            if chunk.most_interesting_short_section:
+                all_clips.append(chunk.most_interesting_short_section)
+            all_outlines.extend(chunk.chunk_outline)
 
-            # Merge outlines (TopicOutlineItem -> SubTopicOutlineItem)
-            for item in analysis.chunk_outline:
-                topic = item.topic
-                entry = combined_outline.setdefault(topic, {"topic_overview": item.topic_overview or "", "subtopics": {}})
-                if not entry["topic_overview"] and item.topic_overview:
-                    entry["topic_overview"] = item.topic_overview
-                for st in item.subtopics:
-                    st_entry = entry["subtopics"].setdefault(st.subtopic, set())
-                    for det in (st.details or []):
-                        st_entry.add(det)
+        # Stage 2: Generate executive and detailed summaries first
+        summary_prompt = f"""Based on these chunk summaries from a video, create:
+        Summaries:
+        1. Executive Summary: A concise 3-5 sentence high-level summary capturing the essence of the entire video.
+        2. Detailed Chronological Summary: A comprehensive summary broken down chronologically, covering key points in the order they were presented in the video.
+        3. Chronological Outline: A detailed outline broken down chronologically, covering key points in the order they were presented in the video and outline structure splitting actions and sub-actions and topics and sub-topics.
 
-        # Create a context string for the AI
-        # Build raw outline list for the model input
-        raw_outline = []
-        for topic, data in combined_outline.items():
-            subtopic_list = [
-                {"subtopic": st, "details": sorted(list(details))}
-                for st, details in data["subtopics"].items()
-            ]
-            raw_outline.append({
-                "topic": topic,
-                "topic_overview": data["topic_overview"],
-                "subtopics": subtopic_list
-            })
+        Chunk Summaries:
+        {chr(10).join([f"<<<START Chunk {i + 1}>>>>: {summary}  <<<END Chunk {i + 1}>>>>|||||||||||||||||" for i, summary in enumerate(all_summaries)])}
 
-        context = {
-            "video_title": video_title or "Video",
-            "chunk_summaries": all_summaries,
-            "all_topics": list(set(all_topics)),  # Deduplicate
-            "raw_outline": raw_outline,
-            "all_chapters": [
-                {"time": self.format_timestamp(ch.timestamp_seconds),
-                 "title": ch.title,
-                 "description": ch.description}
-                for ch in all_chapters
-            ],
-            "quotes": [pq.model_dump() for pq in all_quotes]
-        }
-
-        system_prompt = """You are creating a comprehensive analysis of a complete video based on individual chunk analyses.
-
-        Synthesize the provided information to create the FullVideoAnalysis object:
-        1. executive_summary (2-3 sentences capturing the essence)
-        2. detailed_summary (comprehensive but concise overview)
-        3. main_themes (deduplicated and organized by importance)
-        4. complete_outline: list of TopicOutlineItem objects with topic, topic_overview, and subtopics (list of SubTopicOutlineItem with subtopic and details list)
-        5. chapters: refined list (combine similar chapters, ensure logical flow)
-        6. key_takeaways (5-10 main insights)
-        7. pull_quotes: select the best 8-10 PullQuote objects
-
-        For chapters:
-        - Combine very similar/redundant chapters
-        - Ensure smooth progression through the video
-        - Keep timestamps from the original chapters
-        - Aim for 10-25 chapters for the full video
-        - Remove duplicate chapters that might come from overlapping chunks
+        Provide your response in JSON format in accordance to the provided schema
         """
 
-        try:
-            response = await self.processor.async_make_openai_json_mode_ai_request(
-                system_prompt=system_prompt,
-                input_data=context,
-                output_model=FullVideoAnalysis
-            )
-            return response
+        summary_response = await self.processor.async_make_openai_json_mode_ai_request(
+            system_prompt=summary_prompt,
+            input_data={},
+            output_model=SummaryGeneration
+        )
 
-        except Exception as e:
-            print(f"Error combining analyses: {e}")
-            raise
+
+
+
+
+
+
+        # Stage 5: Extract main themes and key takeaways
+        themes_prompt = f"""Based on this video analysis, identify:
+        1. main_themes: 5-8 primary themes (deduplicated and prioritized)
+        2. key_takeaways: 5-10 main insights and conclusions
+
+        Executive Summary: {summary_response.executive_summary}
+
+        All Topics from chunks:
+        {chr(10).join(list(set(all_topics))[:50])}  # Dedupe and limit for context
+
+        Video Outline Main Topics:
+        {chr(10).join([f"- {topic.topic}: {topic.topic_overview}" for topic in outline_response.complete_outline])}
+
+        respond in JSON format with keys according to the provided schema.
+        """
+
+        themes_response = await self.processor.async_make_openai_json_mode_ai_request(
+            system_prompt=themes_prompt,
+            input_data={},
+            output_model=ThemesAndTakeaways
+        )
+
+
+        # Stage 6: Rank and select top pull quotes
+        if len(all_pull_quotes) > 10:
+            quotes_prompt = f"""Rank these pull quotes and select the TOP 10 most impactful ones.
+
+            Video Summary: {summary_response.executive_summary}
+
+            All Pull Quotes:
+            {[q.model_dump_json(indent=2) for i, q in enumerate(all_pull_quotes)]}
+
+            Select quotes that are:
+            - Most insightful or thought-provoking
+            - Representative of main themes
+            - Memorable and quotable
+            - Diverse (covering different parts/topics)
+
+            Respond in JSON Format according to the provided schema
+            """
+
+            quotes_response = await self.processor.async_make_openai_json_mode_ai_request(
+                system_prompt=quotes_prompt,
+                input_data={},
+                output_model=QuoteSelection
+            )
+
+            top_pull_quotes = quotes_response.top_pull_quotes
+        else:
+            top_pull_quotes = all_pull_quotes
+        top_pull_quotes = sorted(top_pull_quotes, key=lambda x: x.timestamp_seconds)
+        # remove duplicates based on text_content
+        seen_quotes = set()
+        unique_pull_quotes = []
+        for quote in top_pull_quotes:
+            if quote.text_content not in seen_quotes:
+                unique_pull_quotes.append(quote)
+                seen_quotes.add(quote.text_content)
+        top_pull_quotes = unique_pull_quotes
+        # Stage 7: Rank and select top 60-second clips
+        if len(all_clips) > 10:
+            clips_prompt = f"""Rank these 60-second clips and select the TOP 10 most interesting ones.
+
+            Video Summary: {summary_response.executive_summary}
+
+            All Clips:
+            {[c.model_dump_json(indent=2) for c in all_clips]}
+
+            Select clips that would work best as standalone content for social media (TikTok, YouTube Shorts, etc):
+            - Self-contained stories or insights
+            - High entertainment or educational value
+            - Strong hooks and conclusions
+            - Diverse topics and moments
+
+            Respond in JSON Format according to the provided schema
+                        """
+
+            clips_response = await self.processor.async_make_openai_json_mode_ai_request(
+                system_prompt=clips_prompt,
+                input_data={},
+                output_model=ClipSelection
+            )
+
+            top_clips = clips_response.top_clips
+        else:
+            top_clips = all_clips
+
+        # Create final FullVideoAnalysis
+        full_analysis = FullVideoAnalysis(
+            executive_summary=summary_response.executive_summary,
+            detailed_summary=summary_response.detailed_summary,
+            main_themes=themes_response.main_themes,
+            complete_outline=outline_response.complete_outline,
+            chapters=chapters_response.chapters,
+            key_takeaways=themes_response.key_takeaways,
+            pull_quotes=top_pull_quotes,
+            particularly_interesting_60_second_clips=top_clips
+        )
+
+        return full_analysis
 
     async def generate_formatted_outputs(self,
                                          analysis: FullVideoAnalysis,
-                                         output_folder: Path):
+                                         output_folder: Path,):
         """Generate user-friendly formatted outputs using template formatters."""
-
+        output_folder.mkdir(parents=True, exist_ok=True)
         # Initialize formatters
         youtube_formatter = YouTubeDescriptionFormatter()
         markdown_formatter = MarkdownReportFormatter()
