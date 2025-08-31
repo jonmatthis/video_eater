@@ -27,7 +27,7 @@ class YouTubeDescriptionFormatter:
 
 📝 VIDEO SUMMARY
 {{ '-' * 50 }}
-{{ analysis.summary.executive_summary }}
+{{ analysis.summary.one_sentence_summary }}
 
 
 📚 CHAPTERS
