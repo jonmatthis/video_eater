@@ -167,7 +167,7 @@ class YouTubeDownloader:
         else:
             # Default subfolder: title-videoid
             safe_title: str = self._sanitize_filename(title=str(info['title']))
-            default_subfolder: str = f"{safe_title}-{info.get('id', '')}"
+            default_subfolder: str = f"{safe_title}-{info.get('video_id')}"
             output_dir = output_dir / default_subfolder
             output_dir.mkdir(parents=True, exist_ok=True)
         
@@ -186,15 +186,16 @@ class YouTubeDownloader:
         
         # Set file extension based on download type
         extension: str = "mp3" if self.audio_only else "mp4"
-        
+        if 'playlist' in str(output_dir):
+            output_dir = output_dir / base_filename
+
         output_template: str = str(output_dir / f"{base_filename}.%(ext)s")
         expected_output: Path = output_dir / f"{base_filename}.{extension}"
-        
+
         # Check if already downloaded
         if expected_output.exists():
             logger.info(f"Video already downloaded: {expected_output}")
             return expected_output
-        
         # Configure yt-dlp
         ydl_opts: dict[str, object] = self._get_ydl_opts(output_template=output_template)
         
@@ -265,9 +266,10 @@ class YouTubeDownloader:
                 logger.info(f"Downloading video {i}/{len(entries)}: {entry.get('title', 'Unknown')}")
                 
                 try:
+                    playlist_title: str = self._sanitize_filename(title=str(playlist_info.get('title')))
                     file_path: Path = await self.download(
                         url=video_url,
-                        subfolder=self._sanitize_filename(title=str(playlist_info.get('title', 'playlist')))
+                        subfolder=f"playlists/{playlist_title}"
                     )
                     downloaded_files.append(file_path)
                 except Exception as e:

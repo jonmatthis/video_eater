@@ -1,15 +1,14 @@
 # __main__.py (updated with YouTube support)
 import asyncio
-from pathlib import Path
-import click
-import yaml
 import logging
+from pathlib import Path
+
+import yaml
 
 from video_eater.core.config_models import VideoProject, ProcessingConfig
 from video_eater.core.handle_video.youtube_getter import YouTubeDownloader, CachedYouTubeDownloader
 from video_eater.core.pipeline import VideoProcessingPipeline
 
-import logging
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
 
@@ -18,9 +17,12 @@ DEFAULT_VIDEO_INPUTS = [
     # r"C:\Users\jonma\syncthing-folders\jon-alienware-pc-synology-nas-sync\videos\livestream_videos\2025-08-14-JSM-Livestream-Skellycam\2025-08-14-JSM-Livestream-Skellycam.mp4",
     # r"C:\Users\jonma\syncthing-folders\jon-alienware-pc-synology-nas-sync\videos\livestream_videos\2025-08-07-JSM-Livestream\2025-08-07-JSM-Livestream-RAW.mp4",
     "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    "https://www.youtube.com/playlist?list=PLWxH2Ov17q5HDfMBJxD_cE1lowM1cr_BV",
+    # [2025] Neural Control of Real-World Human Movement playlist
 ]
 
 DEFAULT_DOWNLOAD_DIR = r"C:\Users\jonma\syncthing-folders\jon-alienware-pc-synology-nas-sync\videos\video_eater_downloads"
+
 
 async def process_input(input_path: str,
                         downloader: YouTubeDownloader,
@@ -51,34 +53,15 @@ async def process_input(input_path: str,
     print(result.summary_report())
 
 
-@click.command()
-@click.argument('inputs', nargs=-1)
-@click.option('--config', type=click.Path(), help='Config file path')
-@click.option('--force-all', is_flag=True, help='Force reprocess everything')
-@click.option('--download-dir', type=click.Path(),
-              default=DEFAULT_DOWNLOAD_DIR, help='Directory for YouTube downloads')
-@click.option('--youtube-quality', default='best',
-              help='YouTube video quality (best, 1080, 720, etc.)')
-@click.option('--audio-only', is_flag=True,
-              help='Download only audio from YouTube videos')
-@click.option('--use-cache', is_flag=True,
-              help='Use cached YouTube downloads if available')
-@click.option('--from-file', type=click.Path(exists=True),
-              help='Read input URLs/paths from a text file (one per line)')
-@click.option('--playlist', is_flag=True,
-              help='Treat YouTube URLs as playlists')
-@click.option('--max-videos', type=int,
-              help='Maximum videos to download from playlist')
-def main(inputs: tuple[str, ...],
-         config: str | None,
-         force_all: bool,
-         download_dir: str,
-         youtube_quality: str,
-         audio_only: bool,
-         use_cache: bool,
-         from_file: str | None,
-         playlist: bool,
-         max_videos: int | None) -> None:
+def main(inputs: tuple[str, ...] | None = None,
+         config: str | None = None,
+         force_all: bool = False,
+         download_dir: str | None = None,
+         youtube_quality: str = "best",
+         audio_only: bool = False,
+         use_cache: bool = True,
+         from_file: str | None = None,
+         max_videos: int | None = None) -> None:
     """
     Process videos through the transcription and analysis pipeline.
 
@@ -117,7 +100,7 @@ def main(inputs: tuple[str, ...],
         processing_config.force_analyze = True
 
     # Gather all inputs
-    all_inputs: list[str] = list(inputs)
+    all_inputs: list[str] = list(inputs) if inputs else []
     if not all_inputs:
         all_inputs = DEFAULT_VIDEO_INPUTS.copy()
 
@@ -129,10 +112,6 @@ def main(inputs: tuple[str, ...],
 
     if not download_dir:
         download_dir = DEFAULT_DOWNLOAD_DIR
-
-        if playlist:
-            download_dir = str(Path(download_dir) / "playlists")
-
 
     # Setup YouTube downloader
     download_path: Path = Path(download_dir)
@@ -162,7 +141,7 @@ def main(inputs: tuple[str, ...],
         regular_inputs: list[str] = []
 
         for input_path in all_inputs:
-            if playlist and YouTubeDownloader.is_youtube_url(url=input_path):
+            if "playlist" in input_path and YouTubeDownloader.is_youtube_url(url=input_path):
                 playlist_urls.append(input_path)
             else:
                 regular_inputs.append(input_path)
