@@ -2,7 +2,7 @@
 from typing import Optional
 from pydantic import BaseModel
 
-from video_eater.core.audio_extractor import AudioExtractor
+from video_eater.core.handle_video.audio_extractor import AudioExtractor
 from video_eater.core.config_models import VideoProject, ProcessingStats, ProcessingConfig, TranscriptionProvider
 from video_eater.core.output_templates import YouTubeDescriptionFormatter, MarkdownReportFormatter, JsonFormatter, \
     SimpleTextFormatter
@@ -16,16 +16,15 @@ class VideoProcessingPipeline:
     """Clean, maintainable video processing pipeline."""
 
     def __init__(self,
-                 config: ProcessingConfig,
-                 logger: Optional[PipelineLogger] = None):
+                 config: ProcessingConfig):
         self.config = config
-        self.logger = logger or PipelineLogger()
+        self.pipeline_logger = PipelineLogger()
         self.stats = ProcessingStats()
 
     async def process_video(self, project: VideoProject):
         """Process a single video through the pipeline."""
 
-        self.logger.step(1, 3, f"Processing: {project.video_path.name}")
+        self.pipeline_logger.step(1, 3, f"Processing: {project.video_path.name}")
 
         # Each step is now clean and focused
         audio_chunks = await self._extract_audio(project)
@@ -50,7 +49,7 @@ class VideoProcessingPipeline:
         if not self.config.force_chunk_audio:
             existing = extractor.find_existing_chunks(project.audio_chunks_folder)
             if existing:
-                self.logger.cache_hit(f"{len(existing)} audio chunks")
+                self.pipeline_logger.cache_hit(f"{len(existing)} audio chunks")
                 self.stats.audio_chunks_cached = len(existing)
                 return existing
 
@@ -61,7 +60,7 @@ class VideoProcessingPipeline:
         )
 
         self.stats.audio_chunks_created = len(chunks)
-        self.logger.success(f"Created {len(chunks)} audio chunks")
+        self.pipeline_logger.success(f"Created {len(chunks)} audio chunks")
 
         return chunks
 
@@ -88,7 +87,7 @@ class VideoProcessingPipeline:
         cached = 0 if self.config.force_transcribe else before_count
         self.stats.transcripts_created = created
         self.stats.transcripts_cached = cached
-        self.logger.success(f"Prepared {after_count} transcript chunks ({created} new, {cached} cached)")
+        self.pipeline_logger.success(f"Prepared {after_count} transcript chunks ({created} new, {cached} cached)")
         return transcripts
 
     async def _analyze_transcripts(self, project: VideoProject, transcripts):
@@ -133,7 +132,7 @@ class VideoProcessingPipeline:
             content = formatter.format(analysis)
             with open(output_file, 'w', encoding='utf-8') as f:
                 f.write(content)
-            self.logger.success(f"Generated {filename}")
+            self.pipeline_logger.success(f"Generated {filename}")
 
         return list(formatters.keys())
 
