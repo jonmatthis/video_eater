@@ -176,7 +176,7 @@ class TopicAreaPromptModel(BaseModel):
         description="A brief description of this interest, including any relevant background information, key concepts, notable figures, recent developments, and related topics. This should be a concise summary that provides context and depth to the interest")
 
     def __str__(self):
-        return f"**{self.name}**\n ({self.category} > {self.subject} > {self.topic} > {self.subtopic} > {self.niche}):\n {self.description}"
+        return f"**#{self.name.replace(' ','-')}**\n \t(#{self.category.replace(' ','-')} | #{self.subject.replace(' ','-')} | #{self.topic.replace(' ','-')} | #{self.subtopic.replace(' ','-')} | #{self.niche.replace(' ','-')}):\n\t\t {self.description}"
 
 
 class ThemesAndTakeawaysPromptModel(PromptModel):

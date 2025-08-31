@@ -3,6 +3,7 @@ import json
 import logging
 import re
 import time
+from copy import deepcopy
 from datetime import timedelta
 from pathlib import Path
 from typing import List, Tuple
@@ -267,11 +268,12 @@ class TranscriptProcessor:
         # Combine all analyses (or load from cache if already done)
         combined_file = chunk_analysis_output_folder.parent.parent / "full_video_analysis.yaml"
 
-        if combined_file.exists():
-            print(f"\n📂 Using cached full video analysis from {combined_file}")
-            with open(combined_file, 'r', encoding='utf-8') as f:
-                full_analysis = FullVideoAnalysis(**yaml.safe_load(f))
-            return full_analysis
+
+        # if combined_file.exists():
+        #     print(f"\n📂 Using cached full video analysis from {combined_file}")
+        #     with open(combined_file, 'r', encoding='utf-8') as f:
+        #         full_analysis = FullVideoAnalysis(**yaml.safe_load(f))
+        #     return full_analysis
         print("\n🔄 Combining all chunk analyses...")
         full_analysis = await self.combine_analyses(all_chunk_analyses)
 
@@ -299,12 +301,13 @@ class TranscriptProcessor:
         all_clips = []
 
         for chunk in chunk_analyses:
-            all_summaries.append(chunk.summary)
-            all_themes.extend(chunk.main_themes)
-            all_takeaways.extend(chunk.key_takeaways)
-            all_topics.extend(chunk.topic_areas)
-            all_pull_quotes.extend(chunk.pull_quotes)
-            all_clips.append(chunk.most_interesting_short_section)
+            chunk_copy = deepcopy(chunk)
+            all_summaries.append(chunk_copy.summary)
+            all_themes.extend(chunk_copy.main_themes)
+            all_takeaways.extend(chunk_copy.key_takeaways)
+            all_topics.extend(chunk_copy.topic_areas)
+            all_pull_quotes.extend(deepcopy(chunk_copy.pull_quotes))
+            all_clips.append(chunk_copy.most_interesting_short_section)
 
         # Stage 2: Generate executive and detailed summaries first
         chunk_summary_string = ""
@@ -403,19 +406,10 @@ class TranscriptProcessor:
         # else:
         #     top_pull_quotes = all_pull_quotes
         #sort by quality field (highest first)
-        top_pull_quotes = sorted(all_pull_quotes, key=lambda x: x.quality, reverse=True)
-
+        top_pull_quotes = sorted(deepcopy(all_pull_quotes), key=lambda x: x.quality, reverse=True)
 
         #Sort according to "quality" field (highest first)
         top_pull_quotes.sort(key=lambda x: x.quality, reverse=True)
-        # remove duplicates based on text_content
-        seen_quotes = set()
-        unique_pull_quotes = []
-        for quote in top_pull_quotes:
-            if quote.text_content not in seen_quotes:
-                unique_pull_quotes.append(quote)
-                seen_quotes.add(quote.text_content)
-        top_pull_quotes = unique_pull_quotes
         pull_quote_response_string = "\n".join(str(quote) for quote in top_pull_quotes)
         print(
             f"_________________________________________\n\n Pull Quotes Response:\n{pull_quote_response_string}\n\n________________________________________")

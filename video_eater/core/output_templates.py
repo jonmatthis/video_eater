@@ -13,7 +13,10 @@ class OutputFormatter(Protocol):
         ...
 
 
-AI_DISCLAIMER_AND_SOURCE_CODE = "(AI generated summary - anticipate wonk. Generated code available here: https://github.com/jonmatthis/video_eater)"
+AI_DISCLAIMER_AND_SOURCE_CODE = ("```\n"
+                                 "AI generated summary - anticipate wonk.\n"
+                                 "Generated via: https://github.com/jonmatthis/video_eater\n"
+                                 "```\n\n")
 
 
 class YouTubeDescriptionFormatter:
@@ -22,17 +25,10 @@ class YouTubeDescriptionFormatter:
     template = Template("""
 {{ ai_disclaimer_and_source_code }}
 
-{% if include_executive_summary %}
-🗒️ EXECUTIVE SUMMARY
-{{ '-' * 50 }}
-{{ analysis.summary.executive_summary }}
-{% else %}
-{%if include_one_sentence_summary %}
 📝 VIDEO SUMMARY
 {{ '-' * 50 }}
-{{ analysis.summary.one_sentence_summary }}
-{%endif%}
-{% endif %}
+{{ analysis.summary.executive_summary }}
+
 
 📚 CHAPTERS
 {{ '-' * 50 }}
@@ -53,6 +49,7 @@ class YouTubeDescriptionFormatter:
 {{ '-' * 50 }}
 {% for topic in analysis.topics %}
 • {{ topic }}
+
 {% endfor %}
 
 💭 MAIN THEMES
@@ -66,6 +63,7 @@ class YouTubeDescriptionFormatter:
 {{ '-' * 50 }}
 {% for quote in analysis.pull_quotes %}
 {{ quote.as_string_youtube_formatted_timestamp }}"
+
 {% endfor %}
 {% endif %}
 """)
