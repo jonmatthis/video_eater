@@ -1,5 +1,7 @@
 # pipeline.py
 from typing import Optional
+
+import yaml
 from pydantic import BaseModel
 
 from video_eater.core.handle_video.audio_extractor import AudioExtractor
@@ -30,7 +32,7 @@ class VideoProcessingPipeline:
         audio_chunks = await self._extract_audio(project)
         transcripts = await self._transcribe_chunks(project)
         analysis = await self._analyze_transcripts(project, transcripts)
-        output_files = await self._generate_outputs(project, analysis)
+        _ = await self._generate_outputs(project, analysis)
         return PipelineResult(
             project=project,
             stats=self.stats,
@@ -101,15 +103,33 @@ class VideoProcessingPipeline:
             chunk_overlap_seconds=self.config.chunk_overlap_seconds,
         )
 
-        analysis = await processor.process_transcript_folder(
+        chunk_analyses = await processor.process_transcript_folder(
             transcript_folder=project.transcript_chunks_folder,
             chunk_analysis_output_folder=project.analysis_folder,
-            full_output_folder=project.output_folder
         )
+        # Combine all analyses (or load from cache if already done)
+        combined_file = project.video_path.parent / "full_video_analysis.yaml"
 
-        self.stats.analyses_created = processor.processing_stats.get('chunks_processed', 0)
-        self.stats.analyses_cached = processor.processing_stats.get('chunks_cached', 0)
-        return analysis
+
+        if combined_file.exists():
+            print(f"\n📂 Using cached full video analysis from {combined_file}")
+            with open(combined_file, 'r', encoding='utf-8') as f:
+                full_analysis = FullVideoAnalysis(**yaml.safe_load(f))
+            return full_analysis
+
+        print("\n🔄 Combining all chunk analyses...")
+        full_analysis = await processor.combine_analyses(chunk_analyses)
+
+        # Save combined analysis as YAML
+        with open(combined_file, 'w', encoding='utf-8') as f:
+            yaml.dump(full_analysis.model_dump(), f,
+                      default_flow_style=False,
+                      sort_keys=False,
+                      allow_unicode=True)
+        print(f"💾 Saved combined analysis to {combined_file}")
+
+
+        return full_analysis
 
 
     async def _generate_outputs(self, project: VideoProject, analysis: FullVideoAnalysis):

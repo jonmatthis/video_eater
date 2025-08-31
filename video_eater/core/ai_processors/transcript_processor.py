@@ -11,12 +11,9 @@ from typing import List, Tuple
 import yaml
 
 from video_eater.core.ai_processors.ai_prompt_models import ChunkAnalysis, FullVideoAnalysis, \
-    TranscriptSummaryPromptModel, ThemesAndTakeawaysPromptModel, PullQuotesSelectionPromptModel, \
-    MostInterestingShortSectionSelectionPromptModel, StartingTimeString, ChunkAnalysisWithTimestamp, \
+    TranscriptSummaryPromptModel, ThemesAndTakeawaysPromptModel,StartingTimeString, ChunkAnalysisWithTimestamp, \
     PullQuoteWithTimestamp
 from video_eater.core.ai_processors.base_processor import BaseAIProcessor
-from video_eater.core.output_templates import YouTubeDescriptionFormatter, JsonFormatter, MarkdownReportFormatter, \
-    SimpleTextFormatter
 from video_eater.core.transcribe_audio.transcript_models import VideoTranscript
 
 logger = logging.getLogger(__name__)
@@ -138,7 +135,7 @@ class TranscriptProcessor:
             pull_quotes_with_timestamps = []
             for quote in chunk_dict['pull_quotes']:
                 pull_quotes_with_timestamps.append(
-                    PullQuoteWithTimestamp(**quote, starting_timestamp_string=chunk_start_time_string)
+                    PullQuoteWithTimestamp(**quote, chunk_start_timestamp_string=chunk_start_time_string)
                 )
             chunk_dict['pull_quotes'] = pull_quotes_with_timestamps
             response_with_timestamps = ChunkAnalysisWithTimestamp(**chunk_dict,
@@ -214,8 +211,7 @@ class TranscriptProcessor:
 
     async def process_transcript_folder(self,
                                         transcript_folder: Path,
-                                        chunk_analysis_output_folder: Path,
-                                        full_output_folder: Path) -> FullVideoAnalysis:
+                                        chunk_analysis_output_folder: Path) -> list[ChunkAnalysisWithTimestamp]:
         """Process all transcript chunks in a folder with parallel processing."""
 
         start_time = time.perf_counter()
@@ -265,28 +261,8 @@ class TranscriptProcessor:
             for error in self.processing_stats['errors'][:5]:  # Show first 5 errors
                 print(f"    - {error}")
 
-        # Combine all analyses (or load from cache if already done)
-        combined_file = chunk_analysis_output_folder.parent.parent / "full_video_analysis.yaml"
 
-
-        # if combined_file.exists():
-        #     print(f"\n📂 Using cached full video analysis from {combined_file}")
-        #     with open(combined_file, 'r', encoding='utf-8') as f:
-        #         full_analysis = FullVideoAnalysis(**yaml.safe_load(f))
-        #     return full_analysis
-        print("\n🔄 Combining all chunk analyses...")
-        full_analysis = await self.combine_analyses(all_chunk_analyses)
-
-        # Save combined analysis as YAML
-        with open(combined_file, 'w', encoding='utf-8') as f:
-            yaml.dump(full_analysis.model_dump(), f,
-                      default_flow_style=False,
-                      sort_keys=False,
-                      allow_unicode=True)
-        print(f"💾 Saved combined analysis to {combined_file}")
-
-
-        return full_analysis
+        return all_chunk_analyses
 
     async def combine_analyses(self,
                                chunk_analyses: list[ChunkAnalysisWithTimestamp]) -> FullVideoAnalysis:
@@ -298,7 +274,6 @@ class TranscriptProcessor:
         all_takeaways = []
         all_topics = []
         all_pull_quotes = []
-        all_clips = []
 
         for chunk in chunk_analyses:
             chunk_copy = deepcopy(chunk)
@@ -307,7 +282,6 @@ class TranscriptProcessor:
             all_takeaways.extend(chunk_copy.key_takeaways)
             all_topics.extend(chunk_copy.topic_areas)
             all_pull_quotes.extend(deepcopy(chunk_copy.pull_quotes))
-            all_clips.append(chunk_copy.most_interesting_short_section)
 
         # Stage 2: Generate executive and detailed summaries first
         chunk_summary_string = ""
@@ -410,55 +384,11 @@ class TranscriptProcessor:
 
         #Sort according to "quality" field (highest first)
         top_pull_quotes.sort(key=lambda x: x.quality, reverse=True)
+        # keep top 10
+        top_pull_quotes = top_pull_quotes[:20] if len(top_pull_quotes) > 10 else top_pull_quotes
         pull_quote_response_string = "\n".join(str(quote) for quote in top_pull_quotes)
         print(
             f"_________________________________________\n\n Pull Quotes Response:\n{pull_quote_response_string}\n\n________________________________________")
-
-        # Stage 7: Rank and select top intesesting short clips
-        if len(all_clips) > 3:
-            all_clips_string = "\n".join(str(clip) for clip in all_clips)
-            clips_prompt = f""" You will be given a summary and analysis of an extended video transcript along with particularly interesting 60 second clips that were extracted from chunks of the video.
-            Using this information, identify the TOP particularly interesting 60-ish second short clips from the entire video, based on the following criteria:
-            - Relevance to main themes and topics
-            - Uniqueness, interestingness, non-obvious, non-repetitive
-            - Interesting language, phrasing, or storytelling
-            - Standalone interest and coherence (i.e. makes sense on its own without the rest of the video providing context)
-
-            <<<<Full Video Summary and Analysis>>>>
-            {summary_response}
-            <<<<End Full Video Summary and Analysis>>>>
-            
-            ----------------------------------------------------------------------------------------------------------------------------------------     
-            ----------------------------------------------------------------------------------------------------------------------------------------
-            <<<<All Particularly Interesting
-            {all_clips_string}
-            <<<<End All Particularly Interesting 60 Second Clips from Chunks>>>>
-            ----------------------------------------------------------------------------------------------------------------------------------------
-            ----------------------------------------------------------------------------------------------------------------------------------------    
-            Based on the above, provide the TOP Particularly Interesting 60 Second Clips from the entire video in accordance to  JSON format schema provided.
-            
-            """
-
-            clips_response = await self.processor.async_make_openai_json_mode_ai_request(
-                system_prompt=clips_prompt,
-                input_data={},
-                output_model=MostInterestingShortSectionSelectionPromptModel
-            )
-
-            top_clips = clips_response.most_interesting_short_section_candidates
-        else:
-            top_clips = all_clips
-        # remove duplicates based on text_content
-        seen_clips = set()
-        unique_clips = []
-        for clip in top_clips:
-            if clip.text_content not in seen_clips:
-                unique_clips.append(clip)
-                seen_clips.add(clip.text_content)
-        top_clips = unique_clips
-
-        print(
-            f"_________________________________________\n\n Clips Response:\n{[str(clip) for clip in top_clips]}\n\n________________________________________")
 
         # Create final FullVideoAnalysis
         full_analysis = FullVideoAnalysis(
@@ -468,7 +398,6 @@ class TranscriptProcessor:
             topics=themes_response.topic_areas,
             takeaways=themes_response.key_takeaways,
             pull_quotes=top_pull_quotes,
-            most_interesting_clips=top_clips
         )
 
         return full_analysis

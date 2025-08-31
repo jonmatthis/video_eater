@@ -23,6 +23,8 @@ class ChapterHeading(PromptModel):
 
 
 class PullQuote(PromptModel):
+    timestamp_seconds: float = Field(
+        description="Time in seconds whem this quote occurs in the video, this MUST MATCH the timestamp from the video transcript PRECISELY")
     quality: int = Field(
         description="Quality of this pull quote on a scale from 1 to 1000, where 1000 is the highest quality, evaluated on the basis of interestingness, uniqueness, and potential interest and relevance to the deeper themes and meaning of this video",
         ge=1, le=1000)
@@ -35,15 +37,16 @@ class PullQuote(PromptModel):
 
 
 class PullQuoteWithTimestamp(PullQuote):
-    starting_timestamp_string: str  # e.g. "123.45" for a quote starting at 123.45 seconds - to match with filename
+    chunk_start_timestamp_string: str  # e.g. "123.45" for a quote starting at 123.45 seconds - to match with filename
 
     @property
     def starting_timestamp_seconds(self) -> float:
-        return float(self.starting_timestamp_string)
+        return float(self.chunk_start_timestamp_string) + self.timestamp_seconds
 
     def __str__(self):
         output_str = (f"> '{self.text_content}'\n"
-                      f"- **Start:** {float(self.starting_timestamp_seconds):.2f}s\n"
+                      f"- **Start (w/in full recording):** {float(self.starting_timestamp_seconds):.2f}s\n"
+                      f"- **Start (w/in chunk):** {float(self.timestamp_seconds):.2f}s\n"                      
                       f"- **Quality (1-1000):** {self.quality}\n"
                       f"- **Reason for Selection:** {self.reason_for_selection}\n"
                       f"- **Context Around Quote:** {self.context_around_quote}\n")
@@ -57,32 +60,6 @@ class PullQuoteWithTimestamp(PullQuote):
 
         return f"{hours:02}:{minutes:02}:{seconds:02} - '{self.text_content}'"
 
-
-class MostInterestingShortSection(PromptModel):
-    """
-    Model representing a particularly interesting or noteworthy 60-ish-second clip from the video, e.g.
-    the part of this section that would be the best candidate for a standalone short video clip for tiktok, youtube shorts, instagram reels, etc.
-    """
-    starting_timestamp_seconds: float = Field(
-        description="Start time in seconds since recording start, this MUST MATCH the timestamp from the video transcript PRECISELY")
-    ending_timestamp_seconds: float = Field(
-        description="End time in seconds since recording start, this MUST MATCH the timestamp from the video transcript PRECISELY")
-    text_content: str = Field(
-        description="The text of the pull quote precisely as spoken in the video transcript, copied VERBATIM AND IN FULL  with no changes")
-    reason_for_selection: str = Field(description="The reason this clip was selected as particularly interesting")
-    context_around_clip: str = Field("Brief context around the clip to explain its significance")
-    target_audience: str = Field(
-        description="The ideal target audience for this clip, e.g. 'beginners interested in machine learning', 'advanced practitioners in neural networks', 'general audience interested in science', etc.")
-
-    def __str__(self):
-        output_str = (f">'{self.text_content}'\n"
-                      f"- **Start:** {self.starting_timestamp_seconds:.2f}s\n"
-                      f"- **End:** {self.ending_timestamp_seconds:.2f}s\n"
-                      f"- **Target Audience:** {self.target_audience}\n"
-                      f"- **Reason for Selection:** {self.reason_for_selection}\n"
-                      f"- **Context Around Clip:** {self.context_around_clip}\n")
-
-        return output_str
 
 
 class SubTopicOutlineItem(PromptModel):
@@ -207,17 +184,6 @@ class PullQuotesSelectionPromptModel(PromptModel):
         return output_str
 
 
-class MostInterestingShortSectionSelectionPromptModel(PromptModel):
-    most_interesting_short_section_candidates: list[MostInterestingShortSection] = Field(
-        description="A list of 3-5 particularly interesting or noteworthy 60-ish-second clips from the video that we should consider clipping out for use on social media, e.g. the part of this section that would be the best candidate for a standalone short video clip for tiktok, youtube shorts, instagram reels, etc. - ORDERED IN TERMS OF QUALITY WITH THE BEST CLIP FIRST")
-
-    def __str__(self):
-        output_str = (f"## Most Interesting Short Sections\n" + "\n".join(
-            str(section) for section in self.most_interesting_short_section_candidates) + "\n\n"
-                      )
-        return output_str
-
-
 class ChunkAnalysis(PromptModel):
     summary: TranscriptSummaryPromptModel = Field(description="Comprehensive summary of this chunk of the video")
     main_themes: list[str] = Field(
@@ -231,9 +197,6 @@ class ChunkAnalysis(PromptModel):
 
     pull_quotes: list[PullQuote] = Field(
         description="Most impactful, interesting, or otherwise notable pull quotes from the video transcript")
-    most_interesting_short_section: MostInterestingShortSection = Field(
-        description="Particularly interesting or noteworthy section of this chunk, e.g. the part of this section that would be the best candidate for a standalone short video transcript clip for tiktok, youtube shorts, instagram reels, etc."
-    )
 
     def __str__(self):
         output_str = (f"## Chunk Summary\n{self.summary}\n\n"
@@ -244,8 +207,6 @@ class ChunkAnalysis(PromptModel):
             str(area) for area in self.topic_areas) + "\n\n"
                                                       f"## Pull Quotes\n" + "\n".join(
             str(quote) for quote in self.pull_quotes) + "\n\n"
-                                                        f"## Most Interesting Short Section\n" + str(
-            self.most_interesting_short_section) + "\n\n"
                       )
         return output_str
 
@@ -280,8 +241,7 @@ class FullVideoAnalysis(BaseModel):
     themes: list[str]
     topics: list[TopicAreaPromptModel]
     takeaways: list[str]
-    pull_quotes: list[PullQuote]
-    most_interesting_clips: list[MostInterestingShortSection]
+    pull_quotes: list[PullQuoteWithTimestamp]
 
     def trim(self) -> bool:
         """
@@ -324,8 +284,7 @@ class FullVideoAnalysis(BaseModel):
         out_string += "## Overall Key Takeaways\n" + "\n".join(f"- {takeaway}" for takeaway in self.takeaways) + "\n\n"
         out_string += "## Overall Topic Areas\n" + "\n".join(str(area) for area in self.topics) + "\n\n"
         out_string += "## Overall Pull Quotes\n" + "\n".join(str(quote) for quote in self.pull_quotes) + "\n\n"
-        out_string += "## Overall Most Interesting Short Sections\n" + "\n".join(
-            str(clip) for clip in self.most_interesting_clips) + "\n\n"
+
 
         out_string += "\n".join(
             f"\\n\\n------------------------TRANSCRIPT CHUNK ANALYSES------------------------n\n\n### Analysis for Chunk Starting at {chunk.starting_timestamp_string} seconds\n\n{str(chunk)}"
