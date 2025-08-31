@@ -11,7 +11,8 @@ import yaml
 
 from video_eater.core.ai_processors.ai_prompt_models import ChunkAnalysis, FullVideoAnalysis, \
     TranscriptSummaryPromptModel, ThemesAndTakeawaysPromptModel, PullQuotesSelectionPromptModel, \
-    MostInterestingShortSectionSelectionPromptModel, StartingTimeString, ChunkAnalysisWithTimestamp
+    MostInterestingShortSectionSelectionPromptModel, StartingTimeString, ChunkAnalysisWithTimestamp, \
+    PullQuoteWithTimestamp
 from video_eater.core.ai_processors.base_processor import BaseAIProcessor
 from video_eater.core.output_templates import YouTubeDescriptionFormatter, JsonFormatter, MarkdownReportFormatter, \
     SimpleTextFormatter
@@ -132,7 +133,14 @@ class TranscriptProcessor:
                 input_data={},
                 output_model=ChunkAnalysis
             )
-            response_with_timestamps = ChunkAnalysisWithTimestamp(**response.model_dump(),
+            chunk_dict = response.model_dump()
+            pull_quotes_with_timestamps = []
+            for quote in chunk_dict['pull_quotes']:
+                pull_quotes_with_timestamps.append(
+                    PullQuoteWithTimestamp(**quote, starting_timestamp_string=chunk_start_time_string)
+                )
+            chunk_dict['pull_quotes'] = pull_quotes_with_timestamps
+            response_with_timestamps = ChunkAnalysisWithTimestamp(**chunk_dict,
                                                                   starting_timestamp_string=chunk_start_time_string)
             return response_with_timestamps
 
@@ -256,12 +264,18 @@ class TranscriptProcessor:
             for error in self.processing_stats['errors'][:5]:  # Show first 5 errors
                 print(f"    - {error}")
 
-        # Combine all analyses
+        # Combine all analyses (or load from cache if already done)
+        combined_file = chunk_analysis_output_folder.parent.parent / "full_video_analysis.yaml"
+
+        if combined_file.exists():
+            print(f"\n📂 Using cached full video analysis from {combined_file}")
+            with open(combined_file, 'r', encoding='utf-8') as f:
+                full_analysis = FullVideoAnalysis(**yaml.safe_load(f))
+            return full_analysis
         print("\n🔄 Combining all chunk analyses...")
         full_analysis = await self.combine_analyses(all_chunk_analyses)
 
         # Save combined analysis as YAML
-        combined_file = chunk_analysis_output_folder.parent / "full_video_analysis.yaml"
         with open(combined_file, 'w', encoding='utf-8') as f:
             yaml.dump(full_analysis.model_dump(), f,
                       default_flow_style=False,
@@ -269,9 +283,6 @@ class TranscriptProcessor:
                       allow_unicode=True)
         print(f"💾 Saved combined analysis to {combined_file}")
 
-        # # Generate formatted outputs
-        # await self.generate_formatted_outputs(full_analysis,
-        #                                         output_folder=full_output_folder)
 
         return full_analysis
 
@@ -357,40 +368,46 @@ class TranscriptProcessor:
             f"________________________________________\n\n Themes Response:\n{themes_response}\n\n________________________________________")
 
         # Stage 6: Rank and select top pull quotes
-        all_pull_quotes_string = "\n".join(str(quote) for quote in all_pull_quotes)
-        if len(all_pull_quotes) > 3:
-            quotes_prompt = f""" You will be given a summary and analysis of an extended video transcript along with pull quotes that were extracted from chunks of the video.
-            Using this information, identify the TOP PULL QUOTES from the entire video, based on the following criteria:
-            - Relevance to main themes and topics
-            - Uniqueness, interestingness, non-obvious, non-repetitive
-            - Interesting language, phrasing, or storytelling
+        # all_pull_quotes_string = "\n".join(str(quote) for quote in all_pull_quotes)
+        # if len(all_pull_quotes) > 3:
+        #     quotes_prompt = f""" You will be given a summary and analysis of an extended video transcript along with pull quotes that were extracted from chunks of the video.
+        #     Using this information, identify the TOP PULL QUOTES from the entire video, based on the following criteria:
+        #     - Relevance to main themes and topics
+        #     - Uniqueness, interestingness, non-obvious, non-repetitive
+        #     - Interesting language, phrasing, or storytelling
+        #
+        #     Add the quotes to the list IN ORDER OF QUALITY, so that the BEST quotes are at the top of the list.
+        #
+        #     <<<<Full Video Summary and Analysis>>>>
+        #     {summary_response}
+        #     <<<<End Full Video Summary and Analysis>>>>
+        #
+        #     ----------------------------------------------------------------------------------------------------------------------------------------
+        #     ----------------------------------------------------------------------------------------------------------------------------------------
+        #     <<<<All Pull Quotes from Chunks>>>>
+        #     {all_pull_quotes_string}
+        #     <<<<End All Pull Quotes from Chunks>>>>
+        #     ----------------------------------------------------------------------------------------------------------------------------------------
+        #     ----------------------------------------------------------------------------------------------------------------------------------------
+        #     Based on the above, provide the TOP PULL QUOTES from the entire video in accordance to  JSON format schema provided.
+        #
+        #     """
+        #
+        #     quotes_response = await self.processor.async_make_openai_json_mode_ai_request(
+        #         system_prompt=quotes_prompt,
+        #         input_data={},
+        #         output_model=PullQuotesSelectionPromptModel
+        #     )
+        #
+        #     top_pull_quotes = quotes_response.pull_quotes
+        # else:
+        #     top_pull_quotes = all_pull_quotes
+        #sort by quality field (highest first)
+        top_pull_quotes = sorted(all_pull_quotes, key=lambda x: x.quality, reverse=True)
 
-            <<<<Full Video Summary and Analysis>>>>
-            {summary_response}
-            <<<<End Full Video Summary and Analysis>>>>
-            
-            ----------------------------------------------------------------------------------------------------------------------------------------     
-            ----------------------------------------------------------------------------------------------------------------------------------------
-            <<<<All Pull Quotes from Chunks>>>>
-            {all_pull_quotes_string}
-            <<<<End All Pull Quotes from Chunks>>>>
-            ----------------------------------------------------------------------------------------------------------------------------------------
-            ----------------------------------------------------------------------------------------------------------------------------------------    
-            Based on the above, provide the TOP PULL QUOTES from the entire video in accordance to  JSON format schema provided.
-            
-            """
 
-            quotes_response = await self.processor.async_make_openai_json_mode_ai_request(
-                system_prompt=quotes_prompt,
-                input_data={},
-                output_model=PullQuotesSelectionPromptModel
-            )
-
-            top_pull_quotes = quotes_response.pull_quotes
-        else:
-            top_pull_quotes = all_pull_quotes
-        top_pull_quotes = sorted(top_pull_quotes, key=lambda x: x.starting_timestamp_seconds)
-
+        #Sort according to "quality" field (highest first)
+        top_pull_quotes.sort(key=lambda x: x.quality, reverse=True)
         # remove duplicates based on text_content
         seen_quotes = set()
         unique_pull_quotes = []
@@ -462,41 +479,3 @@ class TranscriptProcessor:
 
         return full_analysis
 
-    async def generate_formatted_outputs(self,
-                                         analysis: FullVideoAnalysis,
-                                         output_folder: Path, ):
-        """Generate user-friendly formatted outputs using template formatters."""
-        output_folder.mkdir(parents=True, exist_ok=True)
-        # Initialize formatters
-        youtube_formatter = YouTubeDescriptionFormatter()
-        markdown_formatter = MarkdownReportFormatter()
-        json_formatter = JsonFormatter()
-        simple_formatter = SimpleTextFormatter()
-
-        # YouTube description with chapters
-        youtube_file = output_folder / "youtube_description.txt"
-        youtube_content = youtube_formatter.format(analysis)
-        with open(youtube_file, 'w', encoding='utf-8') as f:
-            f.write(youtube_content)
-        print(f"📄 Generated YouTube description at {youtube_file}")
-
-        # Detailed markdown report
-        markdown_file = output_folder / "video_analysis_report.md"
-        markdown_content = markdown_formatter.format(analysis)
-        with open(markdown_file, 'w', encoding='utf-8') as f:
-            f.write(markdown_content)
-        print(f"📄 Generated markdown report at {markdown_file}")
-
-        # JSON output for programmatic use
-        json_file = output_folder / "video_analysis.json"
-        json_content = json_formatter.format(analysis)
-        with open(json_file, 'w', encoding='utf-8') as f:
-            f.write(json_content)
-        print(f"📄 Generated JSON output at {json_file}")
-
-        # Simple text summary
-        summary_file = output_folder / "video_summary.txt"
-        summary_content = simple_formatter.format(analysis)
-        with open(summary_file, 'w', encoding='utf-8') as f:
-            f.write(summary_content)
-        print(f"📄 Generated simple summary at {summary_file}")

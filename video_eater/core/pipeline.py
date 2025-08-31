@@ -158,6 +158,4 @@ Processing Statistics:
 - Cache hit rate: {self.stats.cache_hit_rate:.1%}
 - Total duration: {self.stats.total_duration_seconds:.1f}s
 
-Analysis Summary:
-{self.analysis.to_markdown()}
 """
