@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -23,8 +25,6 @@ class ChapterHeading(PromptModel):
 
 
 class PullQuote(PromptModel):
-    timestamp_seconds: float = Field(
-        description="Time in seconds whem this quote occurs in the video, this MUST MATCH the timestamp from the video transcript PRECISELY")
     quality: int = Field(
         description="Quality of this pull quote on a scale from 1 to 1000, where 1000 is the highest quality, evaluated on the basis of interestingness, uniqueness, and potential interest and relevance to the deeper themes and meaning of this video",
         ge=1, le=1000)
@@ -37,16 +37,12 @@ class PullQuote(PromptModel):
 
 
 class PullQuoteWithTimestamp(PullQuote):
-    chunk_start_timestamp_string: str  # e.g. "123.45" for a quote starting at 123.45 seconds - to match with filename
+    timestamp_seconds: float
 
-    @property
-    def starting_timestamp_seconds(self) -> float:
-        return float(self.chunk_start_timestamp_string) + self.timestamp_seconds
 
     def __str__(self):
         output_str = (f"> '{self.text_content}'\n"
-                      f"- **Start (w/in full recording):** {float(self.starting_timestamp_seconds):.2f}s\n"
-                      f"- **Start (w/in chunk):** {float(self.timestamp_seconds):.2f}s\n"                      
+                      f"- **Start (w/in full recording):** {float(self.timestamp_seconds):.2f}s\n"
                       f"- **Quality (1-1000):** {self.quality}\n"
                       f"- **Reason for Selection:** {self.reason_for_selection}\n"
                       f"- **Context Around Quote:** {self.context_around_quote}\n")
@@ -54,9 +50,9 @@ class PullQuoteWithTimestamp(PullQuote):
 
     @property
     def as_string_youtube_formatted_timestamp(self) -> str:
-        hours = int(self.starting_timestamp_seconds // 3600)
-        minutes = int((self.starting_timestamp_seconds % 3600) // 60)
-        seconds = int(self.starting_timestamp_seconds % 60)
+        hours = int(self.timestamp_seconds // 3600)
+        minutes = int((self.timestamp_seconds % 3600) // 60)
+        seconds = int(self.timestamp_seconds % 60)
 
         return f"{hours:02}:{minutes:02}:{seconds:02} - '{self.text_content}'"
 
@@ -198,6 +194,20 @@ class ChunkAnalysis(PromptModel):
     pull_quotes: list[PullQuote] = Field(
         description="Most impactful, interesting, or otherwise notable pull quotes from the video transcript")
 
+    def get_pull_quotes(self, normalize_quality:bool, sort_by: Literal["time","quality"]|None = "quality") -> list[PullQuote]:
+        quotes = self.pull_quotes.copy()
+        min_quality = min(quote.quality for quote in quotes)
+        max_quality = max(quote.quality for quote in quotes)
+        if normalize_quality and max_quality > min_quality:
+            for quote in quotes:
+                quote.quality = int(1 + 999 * (quote.quality - min_quality) / (max_quality - min_quality))
+        if sort_by:
+            if sort_by == "quality":
+                quotes.sort(key=lambda q: q.quality, reverse=True)
+            elif sort_by == "time":
+                quotes.sort(key=lambda q: q.timestamp_seconds)
+        return quotes
+
     def __str__(self):
         output_str = (f"## Chunk Summary\n{self.summary}\n\n"
                       f"## Main Themes\n" + "\n".join(f"- {theme}" for theme in self.main_themes) + "\n\n"
@@ -292,3 +302,12 @@ class FullVideoAnalysis(BaseModel):
         )
 
         return out_string
+
+    def get_pull_quotes(self, sort_by: Literal["time","quality"]|None = "quality") -> list[PullQuoteWithTimestamp]:
+        quotes = self.pull_quotes.copy()
+        if sort_by:
+            if sort_by == "quality":
+                quotes.sort(key=lambda q: q.quality, reverse=True)
+            elif sort_by == "time":
+                quotes.sort(key=lambda q: q.timestamp_seconds)
+        return quotes

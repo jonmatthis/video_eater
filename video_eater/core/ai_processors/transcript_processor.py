@@ -14,6 +14,8 @@ from video_eater.core.ai_processors.ai_prompt_models import ChunkAnalysis, FullV
     TranscriptSummaryPromptModel, ThemesAndTakeawaysPromptModel,StartingTimeString, ChunkAnalysisWithTimestamp, \
     PullQuoteWithTimestamp
 from video_eater.core.ai_processors.base_processor import BaseAIProcessor
+from video_eater.core.ai_processors.fuzz_matching_helpers import find_best_match_in_transcript, \
+    match_quotes_to_transcript_srt
 from video_eater.core.transcribe_audio.transcript_models import VideoTranscript
 
 logger = logging.getLogger(__name__)
@@ -132,11 +134,12 @@ class TranscriptProcessor:
                 output_model=ChunkAnalysis
             )
             chunk_dict = response.model_dump()
-            pull_quotes_with_timestamps = []
-            for quote in chunk_dict['pull_quotes']:
-                pull_quotes_with_timestamps.append(
-                    PullQuoteWithTimestamp(**quote, chunk_start_timestamp_string=chunk_start_time_string)
-                )
+            pull_quotes_with_timestamps = await match_quotes_to_transcript_srt(
+                quotes=response.pull_quotes,
+                transcript_srt=transcript_data.full_transcript_timestamps_srt,
+                # start_time_offset=float(chunk_start_time_string)
+            )
+
             chunk_dict['pull_quotes'] = pull_quotes_with_timestamps
             response_with_timestamps = ChunkAnalysisWithTimestamp(**chunk_dict,
                                                                   starting_timestamp_string=chunk_start_time_string)
@@ -281,7 +284,7 @@ class TranscriptProcessor:
             all_themes.extend(chunk_copy.main_themes)
             all_takeaways.extend(chunk_copy.key_takeaways)
             all_topics.extend(chunk_copy.topic_areas)
-            all_pull_quotes.extend(deepcopy(chunk_copy.pull_quotes))
+            all_pull_quotes.extend(chunk_copy.get_pull_quotes(normalize_quality=True, sort_by="quality"))
 
         # Stage 2: Generate executive and detailed summaries first
         chunk_summary_string = ""

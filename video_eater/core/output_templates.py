@@ -237,14 +237,15 @@ class YouTubeDescriptionFormatter:
         visible_chapters = [(i, analysis.chunk_analyses[i]) for i in visible_chapter_indices]
 
         # Get the pull quotes to show (top N by quality)
-        pull_quotes_to_show = analysis.pull_quotes[:max_pull_quotes] if analysis.pull_quotes else []
+        pull_quotes_to_show = analysis.get_pull_quotes(sort_by="quality")[:max_pull_quotes]
 
+        sorted_pull_quotes_to_show = sorted(pull_quotes_to_show, key=lambda pq: pq.timestamp_seconds)
         rendered = self.template.render(
             analysis=analysis,
             format_timestamp=self.format_timestamp,
             include_chapter_descriptions=include_chapter_descriptions,
             visible_chapters=visible_chapters,
-            pull_quotes_to_show=pull_quotes_to_show,
+            pull_quotes_to_show=sorted_pull_quotes_to_show,
             ai_disclaimer_and_source_code=AI_DISCLAIMER_AND_SOURCE_CODE
         )
         # Clean up excessive newlines

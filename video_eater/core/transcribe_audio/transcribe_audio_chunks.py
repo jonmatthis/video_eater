@@ -69,7 +69,7 @@ async def transcribe_audio_chunk_folder(
             chunk_paths=chunks_to_transcribe,
             reprocess_all=re_transcribe,
             local_whisper=local_whisper,
-            use_assembly_ai=True
+            use_assembly_ai=use_assembly_ai
         )
     else:
         print(f"   ℹ️ All chunks already transcribed")
