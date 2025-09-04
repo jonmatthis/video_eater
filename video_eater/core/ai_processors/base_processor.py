@@ -24,7 +24,7 @@ if not os.getenv("OPENAI_API_KEY"):
 class BaseAIProcessor:
     """Base class for AI processors with common functionality."""
 
-    def __init__(self, model: str, force_refresh: bool = False, use_async: bool = True):
+    def __init__(self, model: str|None, force_refresh: bool = False, use_async: bool = True):
         self.use_deepseek = "deepseek" in model
         if not os.getenv("DEEPSEEK_API_KEY"):
             raise EnvironmentError("DEEPSEEK_API_KEY not found in env")
@@ -52,6 +52,8 @@ class BaseAIProcessor:
             self, system_prompt: str, input_data: dict, output_model: Type[T]
     ) -> T:
         """Make an OpenAI request with JSON mode for structured output."""
+        if not self.model:
+            raise ValueError("Model must be specified for to make OpenAI requests.")
         messages = [{"role": "system", "content": system_prompt}]
         if input_data:
             messages.append({"role": "user", "content": json.dumps(input_data)})
@@ -177,6 +179,8 @@ class BaseAIProcessor:
 
     async def async_make_openai_text_request(self, system_prompt: str) -> str:
         """Make an OpenAI request for text generation."""
+        if not self.model:
+            raise ValueError("Model must be specified for to make OpenAI requests.")
         messages = [{"role": "system", "content": system_prompt}]
 
         try:

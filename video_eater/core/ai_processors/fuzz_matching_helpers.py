@@ -24,7 +24,8 @@ def extract_timestamp_from_srt_position(srt_text: str, position: int) -> float:
         h, m, s, ms = last_timestamp.groups()
         return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000.0
 
-    raise ValueError(f"No timestamp found before position {position}")
+    logger.warning(f"No timestamp found before position {position} for quote: {text_before[-30:]} - returning 0.0")
+    return 0.0
 
 
 def find_best_match_in_transcript(

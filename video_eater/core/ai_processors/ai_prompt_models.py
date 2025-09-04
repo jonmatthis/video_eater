@@ -2,7 +2,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-
+import logging
+logger = logging.getLogger(__name__)
 class PromptModel(BaseModel):
     pass
 
@@ -196,17 +197,23 @@ class ChunkAnalysis(PromptModel):
 
     def get_pull_quotes(self, normalize_quality:bool, sort_by: Literal["time","quality"]|None = "quality") -> list[PullQuote]:
         quotes = self.pull_quotes.copy()
-        min_quality = min(quote.quality for quote in quotes)
-        max_quality = max(quote.quality for quote in quotes)
-        if normalize_quality and max_quality > min_quality:
-            for quote in quotes:
-                quote.quality = int(1 + 999 * (quote.quality - min_quality) / (max_quality - min_quality))
-        if sort_by:
-            if sort_by == "quality":
-                quotes.sort(key=lambda q: q.quality, reverse=True)
-            elif sort_by == "time":
-                quotes.sort(key=lambda q: q.timestamp_seconds)
+        try:
+            min_quality = min(quote.quality for quote in quotes)
+            max_quality = max(quote.quality for quote in quotes)
+            if normalize_quality and max_quality > min_quality:
+                for quote in quotes:
+                    quote.quality = int(1 + 999 * (quote.quality - min_quality) / (max_quality - min_quality))
+            if sort_by:
+                if sort_by == "quality":
+                    quotes.sort(key=lambda q: q.quality, reverse=True)
+                elif sort_by == "time":
+                    quotes.sort(key=lambda q: q.timestamp_seconds)
+        except Exception as e:
+            logger.warning(f"Error normalizing or sorting pull quotes: {e}")
+            # If there's an error, just return unsorted/unmodified
+            pass
         return quotes
+
 
     def __str__(self):
         output_str = (f"## Chunk Summary\n{self.summary}\n\n"

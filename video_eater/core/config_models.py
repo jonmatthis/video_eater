@@ -20,7 +20,7 @@ class ProcessingConfig(BaseModel):
 
     # AI models
     analysis_model: str = Field("gpt-4.1-nano", description="Model for analysis")
-    transcription_provider: TranscriptionProvider = TranscriptionProvider.OPENAI
+    transcription_provider: TranscriptionProvider = TranscriptionProvider.ASSEMBLY_AI
     whisper_model: Optional[str] = "large"
 
     # Concurrency

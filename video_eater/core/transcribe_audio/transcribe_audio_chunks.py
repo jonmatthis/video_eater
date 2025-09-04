@@ -164,7 +164,8 @@ async def transcribe_audio_chunks(
     async def transcribe_with_semaphore(
             audio_path: Path,
             transcript_path: Path,
-            index: int
+            index: int,
+            use_assembly_ai: bool = True
     ) -> Tuple[TranscriptionVerbose|VideoTranscript, str]:
         async with semaphore:
             return await _transcribe_single_chunk(
@@ -178,10 +179,14 @@ async def transcribe_audio_chunks(
 
     # Create tasks for all chunks
     tasks = []
-    for i, (audio_path, transcript_path) in enumerate(chunk_paths, 1):
+    for chunk_number, (audio_path, transcript_path) in enumerate(chunk_paths, 1):
 
         task = asyncio.create_task(
-            transcribe_with_semaphore(audio_path, transcript_path, i)
+            transcribe_with_semaphore(audio_path=audio_path,
+                                      transcript_path=transcript_path,
+                                        index=chunk_number,
+                                        use_assembly_ai=use_assembly_ai
+                                      )
         )
         tasks.append(task)
 
@@ -193,9 +198,9 @@ async def transcribe_audio_chunks(
     transcripts = []
     errors = []
 
-    for i, result in enumerate(results):
+    for chunk_number, result in enumerate(results):
         if isinstance(result, Exception):
-            errors.append((chunk_paths[i][0].name, str(result)))
+            errors.append((chunk_paths[chunk_number][0].name, str(result)))
         else:
             transcript, _ = result
             if isinstance(transcript, TranscriptionVerbose):
