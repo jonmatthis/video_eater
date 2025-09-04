@@ -12,6 +12,7 @@ from video_eater.core.pipeline import VideoProcessingPipeline
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
 
+# Accepts: Local files, single YouTube URLs, YouTube playlists
 DEFAULT_VIDEO_INPUTS = [
     r"C:\Users\jonma\syncthing-folders\jon-alienware-pc-synology-nas-sync\Sync\freemocap-stuff\freemocap-clients\ben-scholl\paper-review\New folder\BS_ferret_paper_review_video.mp4"
     # r"C:\Users\jonma\syncthing-folders\jon-alienware-pc-synology-nas-sync\videos\livestream_videos\2025-08-14-JSM-Livestream-Skellycam\2025-08-14-JSM-Livestream-Skellycam.mp4",
