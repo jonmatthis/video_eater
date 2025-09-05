@@ -10,17 +10,18 @@ from video_eater.core.handle_video.youtube_getter import YouTubeDownloader, Cach
 from video_eater.core.pipeline import VideoProcessingPipeline
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
+
 
 # Accepts: Local files, single YouTube URLs, YouTube playlists
 DEFAULT_VIDEO_INPUTS = [
-    "https://www.youtube.com/watch?v=A-YC6a6VTGs", #JKL AI Brief History
+    # "https://www.youtube.com/watch?v=A-YC6a6VTGs", #JKL AI Brief History
+    # "https://www.youtube.com/playlist?list=PLCZJ-1jWKKw4GMxu8VvIPupXmJVG0Wrt5", #JKL AI Short Course playlist
     # r"C:\Users\jonma\syncthing-folders\jon-alienware-pc-synology-nas-sync\Sync\freemocap-stuff\freemocap-clients\ben-scholl\paper-review\New folder\BS_ferret_paper_review_video.mp4"
     # r"C:\Users\jonma\syncthing-folders\jon-alienware-pc-synology-nas-sync\videos\livestream_videos\2025-08-14-JSM-Livestream-Skellycam\2025-08-14-JSM-Livestream-Skellycam.mp4",
     # r"C:\Users\jonma\syncthing-folders\jon-alienware-pc-synology-nas-sync\videos\livestream_videos\2025-08-07-JSM-Livestream\2025-08-07-JSM-Livestream-RAW.mp4",
     # "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-    # "https://www.youtube.com/playlist?list=PLWxH2Ov17q5HDfMBJxD_cE1lowM1cr_BV",
-    # [2025] Neural Control of Real-World Human Movement playlist
+    #  "https://www.youtube.com/playlist?list=PLWxH2Ov17q5HDfMBJxD_cE1lowM1cr_BV", # [2025-Spring] Neural Control of Real-World Human Movement playlist
+     "https://www.youtube.com/playlist?list=PLWxH2Ov17q5HRyRc7_HD5baSYB6kBgsTj", # [2024-Fall] Neural Control of Real-World Human Movement playlist
 ]
 
 DEFAULT_DOWNLOAD_DIR = r"C:\Users\jonma\syncthing-folders\jon-alienware-pc-synology-nas-sync\videos\video_eater_downloads"

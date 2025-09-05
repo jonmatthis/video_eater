@@ -11,7 +11,7 @@ from video_eater.core.output_templates import YouTubeDescriptionFormatter, Markd
 from video_eater.core.transcribe_audio.transcribe_audio_chunks import transcribe_audio_chunk_folder
 from video_eater.core.ai_processors.transcript_processor import TranscriptProcessor
 from video_eater.core.ai_processors.ai_prompt_models import FullVideoAnalysis
-from video_eater.logging_config import PipelineLogger
+from video_eater.logging_configuration.pipeline_logger import PipelineLogger
 
 
 class VideoProcessingPipeline:
