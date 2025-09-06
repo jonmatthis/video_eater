@@ -108,7 +108,7 @@ class VideoProcessingPipeline:
             chunk_analysis_output_folder=project.analysis_folder,
         )
         # Combine all analyses (or load from cache if already done)
-        combined_file = project.video_path.parent / "full_video_analysis.yaml"
+        combined_file = project.output_folder / "full_video_analysis.yaml"
 
 
         if combined_file.exists():
@@ -131,25 +131,29 @@ class VideoProcessingPipeline:
 
         return full_analysis
 
-
     async def _generate_outputs(self, project: VideoProject, analysis: FullVideoAnalysis):
         """Generate outputs using configurable formatters."""
 
-        # Define which formatters to use (this could come from config)
+        # Define which formatters to use
         formatters = {
-            f'{project.video_path.stem}_youtube_description.txt': YouTubeDescriptionFormatter(),
+            f'{project.video_path.stem}_youtube_description.md': YouTubeDescriptionFormatter(),
             f'{project.video_path.stem}_video_analysis_report.md': MarkdownReportFormatter(),
             f'{project.video_path.stem}_video_analysis.json': JsonFormatter(),
             f'{project.video_path.stem}_video_summary.txt': SimpleTextFormatter(),
         }
-
 
         output_folder = project.output_folder
         output_folder.mkdir(parents=True, exist_ok=True)
 
         for filename, formatter in formatters.items():
             output_file = output_folder / filename
-            content = formatter.format(analysis)
+            # Pass project to formatter
+            if hasattr(formatter, 'format'):
+                content = formatter.format(analysis=analysis,
+                                           project=project)
+            else:
+                raise RuntimeError(f"Formatter {formatter} missing 'format' method")
+
             with open(output_file, 'w', encoding='utf-8') as f:
                 f.write(content)
             self.pipeline_logger.success(f"Generated {filename}")

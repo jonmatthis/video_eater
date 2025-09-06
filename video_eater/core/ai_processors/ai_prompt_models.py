@@ -293,10 +293,14 @@ class FullVideoAnalysis(BaseModel):
                     return True
         return False
 
-    def to_markdown(self, disclaimer_text: str | None = None) -> str:
+    def to_markdown(self, disclaimer_text: str | None = None, header:str=None) -> str:
         out_string = ""
-        out_string += self.summary.formatted_title
+        out_string += self.summary.formatted_title.replace("# ","# [FULL] ")
         out_string += self.summary.formatted_full_content
+        if disclaimer_text:
+            out_string += f"\n\n> **Disclaimer:** {disclaimer_text}\n\n"
+        if header:
+            out_string += f"\n\n{header}\n\n"
         out_string += "## Overall Main Themes\n" + "\n".join(f"- {theme}" for theme in self.themes) + "\n\n"
         out_string += "## Overall Key Takeaways\n" + "\n".join(f"- {takeaway}" for takeaway in self.takeaways) + "\n\n"
         out_string += "## Overall Topic Areas\n" + "\n".join(str(area) for area in self.topics) + "\n\n"

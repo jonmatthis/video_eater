@@ -406,7 +406,7 @@ class CachedYouTubeDownloader(YouTubeDownloader):
         )
         self.cache_dir: Path = self.output_dir / '.cache'
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self._cache_index: dict[str, Path] = self._load_cache_index()
+        self._cache_index: dict[str, Path|dict] = self._load_cache_index()
 
     def _load_cache_index(self) -> dict[str, Path]:
         """Load cache index mapping URLs to downloaded files."""
@@ -449,6 +449,19 @@ class CachedYouTubeDownloader(YouTubeDownloader):
         self._save_cache_index()
 
         return file_path
+
+    async def get_video_info(self, url: str) -> dict[str, object]:
+        """Get video info with caching support."""
+        key = f"{url}_video_info"
+        if key in self._cache_index:
+            return self._cache_index[key]
+        result =  await super().get_video_info(url=url)
+        # Cache the info if needed
+        if not url in self._cache_index:
+            self._cache_index[key] = result
+            self._save_cache_index()
+        return result
+
 
 #
 # # example_youtube_usage.py
@@ -608,3 +621,10 @@ class CachedYouTubeDownloader(YouTubeDownloader):
 # if __name__ == "__main__":
 #     # Run one of the examples
 #     asyncio.run(main=basic_download_example())
+
+
+
+
+
+
+

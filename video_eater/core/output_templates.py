@@ -4,7 +4,52 @@ from typing import Protocol
 from jinja2 import Template
 
 from video_eater.core.ai_processors.ai_prompt_models import PromptModel, FullVideoAnalysis
+from video_eater.core.config_models import VideoProject, SourceType
 
+
+def format_youtube_timestamp(seconds: float) -> str:
+    """Convert seconds to YouTube URL timestamp format (e.g., 4m27s)."""
+    total_seconds = int(seconds)
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    secs = total_seconds % 60
+
+    if hours > 0:
+        return f"{hours}h{minutes}m{secs}s"
+    elif minutes > 0:
+        return f"{minutes}m{secs}s"
+    else:
+        return f"{secs}s"
+
+
+def create_youtube_timestamp_link(video_id: str, seconds: float) -> str:
+    """Create a clickable YouTube link with timestamp."""
+    timestamp = format_youtube_timestamp(seconds)
+    return f"https://www.youtube.com/watch?v={video_id}&t={timestamp}"
+
+
+def generate_source_header(project: VideoProject) -> str:
+    """Generate a header with source information."""
+    header = "## SOURCE INFORMATION\n"
+    header += "-" * 50 + "\n"
+
+    if project.source_type == SourceType.FILE:
+        header += f"Source Type: Local File\n"
+        header += f"File Path: {project.video_path}\n"
+    elif project.source_type == SourceType.YOUTUBE:
+        header += f"Source Type: YouTube Video\n"
+        header += f"URL: {project.source_url}\n"
+        if project.video_id:
+            header += f"Video ID: {project.video_id}\n"
+    elif project.source_type == SourceType.PLAYLIST:
+        header += f"Source Type: YouTube Playlist Video\n"
+        header += f"Playlist: {project.playlist_name}\n"
+        header += f"Video URL: {project.source_url}\n"
+        if project.video_id:
+            header += f"Video ID: {project.video_id}\n"
+
+    header += "-" * 50 + "\n\n"
+    return header
 
 class OutputFormatter(Protocol):
     """Protocol for output formatters."""
@@ -13,16 +58,16 @@ class OutputFormatter(Protocol):
         ...
 
 
-AI_DISCLAIMER_AND_SOURCE_CODE = ("```\n"
+AI_DISCLAIMER_AND_SOURCE_CODE = ("---\n"
                                  "AI generated summary - anticipate wonk.\n"
                                  "Generated via: https://github.com/jonmatthis/video_eater\n"
-                                 "```\n\n")
+                                 "---\n\n")
 
 
 class YouTubeDescriptionFormatter:
     """Format analysis for YouTube descriptions."""
 
-    template = Template("""
+    template = Template("""    
 {{ ai_disclaimer_and_source_code }}
 
 📝 VIDEO SUMMARY
@@ -73,7 +118,7 @@ class YouTubeDescriptionFormatter:
 
         return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
-    def format(self, analysis: FullVideoAnalysis, max_length: int = 5000) -> str:
+    def format(self, analysis: FullVideoAnalysis, project:VideoProject, max_length: int = 5000) -> str:
         """
         Format the analysis with sophisticated length trimming.
 
@@ -93,7 +138,6 @@ class YouTubeDescriptionFormatter:
         trimming_stage = 0
         max_trimming_stages = 1000  # Safety to prevent infinite loops
         rendered_string = ""
-
         while trimming_stage < max_trimming_stages:
             rendered_string = self._render_with_settings(
                 analysis=analysis,
@@ -105,7 +149,7 @@ class YouTubeDescriptionFormatter:
 
             if rendered_length <= max_length:
                 print(f"Final formatted string length: {rendered_length} characters")
-                return rendered_string
+                break
 
             print(f"Trimming stage {trimming_stage}: Current length {rendered_length}, target {max_length}")
 
@@ -156,7 +200,9 @@ class YouTubeDescriptionFormatter:
 
         # Fallback if we hit max stages
         print(f"WARNING: Hit maximum trimming stages. Returning at length {len(rendered_string)} characters")
-        return rendered_string
+        title_header = f"# [Abridged] {project.title}\n\n"
+        title_header += generate_source_header(project)
+        return title_header + "\n\n" + rendered_string
 
     def _remove_chapter_by_pattern(self, visible_chapter_indices: list[int]) -> list[int]:
         """
@@ -255,16 +301,20 @@ class YouTubeDescriptionFormatter:
 class MarkdownReportFormatter:
     """Format analysis as detailed markdown report."""
 
-    def format(self, analysis: FullVideoAnalysis) -> str:
-        return analysis.to_markdown(disclaimer_text=AI_DISCLAIMER_AND_SOURCE_CODE)
+    def format(self, analysis: FullVideoAnalysis, project: VideoProject) -> str:
 
+        return analysis.to_markdown(disclaimer_text=AI_DISCLAIMER_AND_SOURCE_CODE,
+                                    header=generate_source_header(project))
 
 class JsonFormatter:
     """Format analysis as JSON for programmatic use."""
 
-    def format(self, analysis: FullVideoAnalysis) -> str:
+    def format(self, analysis: FullVideoAnalysis, project: VideoProject) -> str:
         import json
-        return json.dumps(analysis.model_dump(), indent=2, ensure_ascii=False)
+        analysis_dict = analysis.model_dump()
+        analysis_dict['header'] = generate_source_header(project)
+        analysis_dict['video_project'] = project.to_dict()
+        return json.dumps(analysis_dict, indent=2, ensure_ascii=False)
 
 
 class SimpleTextFormatter:
@@ -272,5 +322,7 @@ class SimpleTextFormatter:
 
     template = Template("""{{ analysis.summary }}""")
 
-    def format(self, analysis: FullVideoAnalysis) -> str:
-        return self.template.render(analysis=analysis)
+    def format(self, analysis: FullVideoAnalysis,project: VideoProject)-> str:
+        header = generate_source_header(project)
+        out_str =  self.template.render(analysis=analysis)
+        return header + out_str
