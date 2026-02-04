@@ -7,13 +7,13 @@ import yaml
 # Add to path
 import sys
 from pathlib import Path
+
 sys.path.append(str(Path(__file__).parent.resolve()))
 from video_eater.core.config_models import ProcessingConfig, VideoProject, SourceType
 from video_eater.core.handle_video.youtube_getter import YouTubeDownloader, CachedYouTubeDownloader
 from video_eater.core.pipeline import VideoProcessingPipeline
 
 logger = logging.getLogger(__name__)
-
 
 # Accepts: Local files, single YouTube URLs, YouTube playlists
 DEFAULT_VIDEO_INPUTS = [
@@ -23,8 +23,11 @@ DEFAULT_VIDEO_INPUTS = [
     # r"C:\Users\jonma\syncthing-folders\jon-alienware-pc-synology-nas-sync\videos\livestream_videos\2025-08-14-JSM-Livestream-Skellycam\2025-08-14-JSM-Livestream-Skellycam.mp4",
     # r"C:\Users\jonma\syncthing-folders\jon-alienware-pc-synology-nas-sync\videos\livestream_videos\2025-08-07-JSM-Livestream\2025-08-07-JSM-Livestream-RAW.mp4",
     # "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-     "https://www.youtube.com/playlist?list=PLWxH2Ov17q5HRyRc7_HD5baSYB6kBgsTj", # [2024-Fall] Neural Control of Real-World Human Movement playlist
-     "https://www.youtube.com/playlist?list=PLWxH2Ov17q5HDfMBJxD_cE1lowM1cr_BV", # [2025-Spring] Neural Control of Real-World Human Movement playlist
+    #  "https://www.youtube.com/playlist?list=PLWxH2Ov17q5HRyRc7_HD5baSYB6kBgsTj", # [2024-Fall] Neural Control of Real-World Human Movement playlist
+    #  "https://www.youtube.com/playlist?list=PLWxH2Ov17q5HDfMBJxD_cE1lowM1cr_BV", # [2025-Spring] Neural Control of Real-World Human Movement playlist
+    # "https://youtube.com/live/lmwA_lgxGeo",
+    # r"D:\videos\obs-recordings\2025-12-18\2025-12-18-10-41-20_mouse-eye-tracker\2025-12-18T10-41gmt-0500-1920x1080-30fps-NV12.mp4",
+    "https://www.youtube.com/watch?v=WFk2bMMKhus"  # [RAW STREAM] 2026 State of the Skelly Address (FreeMoCap Foundation Annual Update)
 ]
 
 DEFAULT_DOWNLOAD_DIR = r"C:\Users\jonma\syncthing-folders\jon-alienware-pc-synology-nas-sync\videos\video_eater_downloads"
@@ -36,23 +39,23 @@ async def process_input(input_path: str,
                         is_from_playlist: bool = False,
                         playlist_name: str | None = None) -> None:
     """Process a single input (local file or YouTube URL)."""
-    
+
     # Initialize source tracking
     source_type: str = SourceType.FILE
     source_url: str | None = None
     video_id: str | None = None
-    
+
     # Check if it's a YouTube URL
     if YouTubeDownloader.is_youtube_url(url=input_path):
         print(f"Detected YouTube URL: {input_path}")
         source_type = SourceType.PLAYLIST if is_from_playlist else SourceType.YOUTUBE
         source_url = input_path
-        
+
         try:
             # Get video info to extract video ID
             video_info = await downloader.get_video_info(url=input_path)
             video_id = video_info.get('video_id', None)
-            
+
             # Download the video
             video_path: Path = await downloader.download(url=input_path)
             print(f"Downloaded to: {video_path}")
@@ -65,7 +68,7 @@ async def process_input(input_path: str,
         if not video_path.exists():
             logger.error(f"File not found: {video_path}")
             raise
-    
+
     # Create project with source information
     project: VideoProject = VideoProject(
         video_path=video_path,
@@ -74,9 +77,10 @@ async def process_input(input_path: str,
         playlist_name=playlist_name,
         video_id=video_id
     )
-    
+
     result = await pipeline.process_video(project=project)
     print(result.summary_report())
+
 
 def main(inputs: tuple[str, ...] | None = None,
          config: ProcessingConfig | None = None,
@@ -177,7 +181,6 @@ def main(inputs: tuple[str, ...] | None = None,
         # Download playlists first
         download_tasks = []
         for playlist_url in playlist_urls:
-
             print(f"Processing playlist: {playlist_url}")
 
             # Get playlist info
@@ -222,9 +225,10 @@ def main(inputs: tuple[str, ...] | None = None,
                 downloader=downloader,
                 pipeline=pipeline,
             )
+
     # Run the async processing
     asyncio.run(main=process_all())
 
 
 if __name__ == "__main__":
-    main()#config=ProcessingConfig(force_analyze=True))
+    main()  # config=ProcessingConfig(force_analyze=True))

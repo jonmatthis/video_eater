@@ -172,6 +172,7 @@ class PipelineResult(BaseModel):
         """Generate a summary report."""
         return f"""
 Pipeline Results for {self.project.title or self.project.video_path.name}
+
 {'=' * 60}
 
 Processing Statistics:
@@ -180,5 +181,8 @@ Processing Statistics:
 - Analyses: {self.stats.analyses_created} created, {self.stats.analyses_cached} cached
 - Cache hit rate: {self.stats.cache_hit_rate:.1%}
 - Total duration: {self.stats.total_duration_seconds:.1f}s
+
+{'=' * 60}
+Find the results at: \n\n{self.project.output_folder}\n\n
 
 """

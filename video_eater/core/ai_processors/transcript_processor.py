@@ -11,7 +11,7 @@ from typing import List, Tuple
 import yaml
 
 from video_eater.core.ai_processors.ai_prompt_models import ChunkAnalysis, FullVideoAnalysis, \
-    TranscriptSummaryPromptModel, ThemesAndTakeawaysPromptModel,StartingTimeString, ChunkAnalysisWithTimestamp, \
+    TranscriptSummaryPromptModel, ThemesAndTakeawaysPromptModel, StartingTimeString, ChunkAnalysisWithTimestamp, \
     PullQuoteWithTimestamp
 from video_eater.core.ai_processors.base_processor import BaseAIProcessor
 from video_eater.core.ai_processors.fuzz_matching_helpers import find_best_match_in_transcript, \
@@ -116,13 +116,13 @@ class TranscriptProcessor:
         This is chunk #{chunk_index} starting at {self.format_timestamp(transcript_data.start_time)} in the video.
 
        <<<Transcript-START>>>
-        
+
         {transcript_data.full_transcript_timestamps_srt}
-        
+
         <<<Transcript-END>>>
-        
+
         Use this information and provie your answer in JSON format according to the provided schema. 
-        
+
         You must use the information from the transcript to fill in the fields as accurately as possible, in effect to best
         summarize and outline the content of this chunk of the video. Ensure precise and careful copying of the direct quotes.
         """
@@ -134,10 +134,15 @@ class TranscriptProcessor:
                 output_model=ChunkAnalysis
             )
             chunk_dict = response.model_dump()
+
+            chunk_start_time = float(chunk_start_time_string)
+            chunk_end_time = chunk_start_time + float(self.chunk_length_seconds)
+
             pull_quotes_with_timestamps = await match_quotes_to_transcript_srt(
                 quotes=response.pull_quotes,
                 transcript_srt=transcript_data.full_transcript_timestamps_srt,
-                # start_time_offset=float(chunk_start_time_string)
+                chunk_start_time=chunk_start_time,
+                chunk_end_time=chunk_end_time,
             )
 
             chunk_dict['pull_quotes'] = pull_quotes_with_timestamps
@@ -194,7 +199,7 @@ class TranscriptProcessor:
 
             # Save successful analysis if it's new
             batch_item = next((item for item in batch if item[0] == idx), None)
-            chunk_index, starting_time_string,  transcript_file = batch_item
+            chunk_index, starting_time_string, transcript_file = batch_item
             if batch_item:
                 analysis_file = output_folder / f"{transcript_file.stem}.analysis.yaml"
 
@@ -208,7 +213,6 @@ class TranscriptProcessor:
 
         # Sort by chunk index (idx) to maintain order
         chunk_analyses.sort(key=lambda x: x[0])
-
 
         return [analysis for _, analysis in chunk_analyses]
 
@@ -232,19 +236,18 @@ class TranscriptProcessor:
         print(f"⏱️ Chunk length: {self.chunk_length_seconds}s, Overlap: {self.chunk_overlap_seconds}s\n")
 
         # Prepare file data with corrected timestamps
-        file_data: list[tuple[int,StartingTimeString,  Path]] = []
+        file_data: list[tuple[int, StartingTimeString, Path]] = []
         for transcript_file in transcript_files:
             chunk_index, start_time, start_time_string = self.parse_chunk_filename(transcript_file.name)
-            file_data.append((chunk_index,start_time_string, transcript_file))
+            file_data.append((chunk_index, start_time_string, transcript_file))
 
         # Process in batches
-        all_chunk_analyses: list[ChunkAnalysisWithTimestamp]= []
+        all_chunk_analyses: list[ChunkAnalysisWithTimestamp] = []
         total_batches = (len(file_data) + self.batch_size - 1) // self.batch_size
 
         for batch_idx in range(0, len(file_data), self.batch_size):
             batch = file_data[batch_idx:batch_idx + self.batch_size]
             current_batch_num = batch_idx // self.batch_size + 1
-
 
             batch_analyses = await self.process_transcript_batch(batch, chunk_analysis_output_folder)
             all_chunk_analyses.extend(batch_analyses)
@@ -263,7 +266,6 @@ class TranscriptProcessor:
             print(f"  • Errors encountered: {len(self.processing_stats['errors'])}")
             for error in self.processing_stats['errors'][:5]:  # Show first 5 errors
                 print(f"    - {error}")
-
 
         return all_chunk_analyses
 
@@ -309,13 +311,13 @@ class TranscriptProcessor:
         print(
             f"________________________________________\n\n Summary Response:\n{summary_response}\n\n________________________________________")
         # Stage 5: Extract main themes and key takeaways
-        all_topic_areas_prompt_string = "- " +"\n\n- ".join([str(t) for t in all_topics])
+        all_topic_areas_prompt_string = "- " + "\n\n- ".join([str(t) for t in all_topics])
         all_themes_prompt_string = "- " + "\n\n- ".join(all_themes)
-        all_takeaways_prompt_string = "- " +"\n\n- ".join(all_takeaways)
+        all_takeaways_prompt_string = "- " + "\n\n- ".join(all_takeaways)
         themes_prompt = f"""You will be given a summary and analysis of an extended video transcript along with topics and themes that were extracted from chunks of the video.
-        
+
         Using this information, identify the MAIN THEMES,  and KEY TAKEAWAYS from the entire video.
-        
+
         <<<<Full Video Summary and Analysis>>>>
         {summary_response}
         <<<<End Full Video Summary and Analysis>>>>
@@ -334,7 +336,7 @@ class TranscriptProcessor:
         <<<< End All Topics, Themes, and Take Aways from Chunks>>>>
         ----------------------------------------------------------------------------------------------------------------------------------------
         ----------------------------------------------------------------------------------------------------------------------------------------
-        
+
         Based on the above, provide the TOPIC AREAS, MAIN THEMES, and KEY TAKEAWAYS from the entire video in accordance to  JSON format schema provided.
         """
 
@@ -382,10 +384,10 @@ class TranscriptProcessor:
         #     top_pull_quotes = quotes_response.pull_quotes
         # else:
         #     top_pull_quotes = all_pull_quotes
-        #sort by quality field (highest first)
+        # sort by quality field (highest first)
         top_pull_quotes = sorted(deepcopy(all_pull_quotes), key=lambda x: x.quality, reverse=True)
 
-        #Sort according to "quality" field (highest first)
+        # Sort according to "quality" field (highest first)
         top_pull_quotes.sort(key=lambda x: x.quality, reverse=True)
         # keep top 10
         top_pull_quotes = top_pull_quotes[:20] if len(top_pull_quotes) > 10 else top_pull_quotes
@@ -404,4 +406,3 @@ class TranscriptProcessor:
         )
 
         return full_analysis
-

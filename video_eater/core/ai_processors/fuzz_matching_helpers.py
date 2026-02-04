@@ -323,30 +323,28 @@ def expand_match_boundaries(
 async def match_quotes_to_transcript_srt(
         quotes: list[PullQuote],
         transcript_srt: str,
-        start_time_offset: float = 0.0
-) -> list:
+        chunk_start_time: float,
+        chunk_end_time: float | None = None,
+) -> list[PullQuoteWithTimestamp]:
     """
     Match a list of pull quotes to their timestamps in the transcript using RapidFuzz.
 
     Args:
-        quotes: List of quote dictionaries with 'quote_text' or 'text_content' field
+        quotes: List of PullQuote objects to match
         transcript_srt: SRT-formatted transcript text
-        start_time_offset: Offset to add to all extracted timestamps (in seconds)
+        chunk_start_time: Start time of this chunk in seconds (used as fallback for failed matches)
+        chunk_end_time: End time of this chunk in seconds (used to estimate position for failed matches)
 
     Returns:
         List of PullQuoteWithTimestamp objects
     """
-
     quotes_with_timestamps: List[PullQuoteWithTimestamp] = []
 
-
-    # Match each quote
-    for quote in quotes:
-        # Try to find the quote in the transcript
+    for quote_index, quote in enumerate(quotes):
         match_result = find_best_match_in_transcript(
             quote.text_content,
             transcript_srt,
-            min_similarity=70.0  # Lower threshold for better recall with RapidFuzz
+            min_similarity=70.0
         )
 
         if match_result:
@@ -355,18 +353,53 @@ async def match_quotes_to_transcript_srt(
 
             logger.info(
                 f"Matched quote with {similarity:.1%} similarity: "
-                f"'{quote.text_content[:50]}...' at {timestamp:.1f}s (offset {start_time_offset:.1f}s)"
+                f"'{quote.text_content[:50]}...' at {timestamp:.1f}s"
             )
 
-            quotes_with_timestamps.append(PullQuoteWithTimestamp(**quote.model_dump(), timestamp_seconds=timestamp + start_time_offset))
-        else:
-            logger.warning(
-                f"Could not find timestamp for quote: '{quote.text_content[:50]}...'"
-            )
-            # Add with default timestamp at 0.0
             quotes_with_timestamps.append(
-                PullQuoteWithTimestamp(**quote.model_dump(), timestamp_seconds=0.0 + start_time_offset))
+                PullQuoteWithTimestamp(**quote.model_dump(), timestamp_seconds=timestamp)
+            )
+        else:
+            fallback_timestamp = _estimate_fallback_timestamp(
+                quote_index=quote_index,
+                total_quotes=len(quotes),
+                chunk_start_time=chunk_start_time,
+                chunk_end_time=chunk_end_time,
+            )
+            logger.warning(
+                f"Could not find timestamp for quote: '{quote.text_content[:50]}...' "
+                f"- using estimated fallback: {fallback_timestamp:.1f}s"
+            )
+            quotes_with_timestamps.append(
+                PullQuoteWithTimestamp(**quote.model_dump(), timestamp_seconds=fallback_timestamp)
+            )
     return quotes_with_timestamps
+
+
+def _estimate_fallback_timestamp(
+        quote_index: int,
+        total_quotes: int,
+        chunk_start_time: float,
+        chunk_end_time: float | None,
+) -> float:
+    """
+    Estimate a reasonable timestamp for a quote when fuzzy matching fails.
+
+    Uses linear interpolation based on quote position within the chunk.
+    """
+    if chunk_end_time is None:
+        chunk_end_time = chunk_start_time + 600.0
+
+    chunk_duration = chunk_end_time - chunk_start_time
+
+    if total_quotes <= 1:
+        position_ratio = 0.5
+    else:
+        # Distribute quotes evenly across 10%-90% of chunk to avoid edge timestamps
+        position_ratio = 0.1 + (0.8 * quote_index / (total_quotes - 1))
+
+    estimated_timestamp = chunk_start_time + (position_ratio * chunk_duration)
+    return round(estimated_timestamp, 2)
 
 
 def batch_match_quotes(

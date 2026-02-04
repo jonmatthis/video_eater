@@ -1,4 +1,5 @@
 import asyncio
+import glob
 import logging
 import re
 from pathlib import Path
@@ -101,6 +102,8 @@ class YouTubeDownloader:
             'cachedir': str(self.output_dir / '.cache'),
             'progress_hooks': [self._progress_hook],
             'postprocessor_hooks': [self._postprocessor_hook],
+            # Enable remote JS challenge solver to handle YouTube's "n" parameter challenge
+            'remote_components': ['ejs:github'],
         }
 
         # Try to add browser cookies
@@ -120,13 +123,16 @@ class YouTubeDownloader:
                 }],
             })
         else:
-            # Video quality selection
+            # Video quality selection - use flexible format strings that work with various video types
+            # including livestream archives which may have limited format availability
             if self.quality == "best":
-                opts['format'] = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+                # Prefer mp4 but fall back gracefully to any available format
+                opts['format'] = 'bestvideo+bestaudio/best'
+                opts['merge_output_format'] = 'mp4'  # Merge to mp4 when combining streams
             elif self.quality.isdigit():
                 # Specific resolution like "1080" or "720"
-                opts[
-                    'format'] = f'bestvideo[height<={self.quality}][ext=mp4]+bestaudio[ext=m4a]/best[height<={self.quality}][ext=mp4]/best'
+                opts['format'] = f'bestvideo[height<={self.quality}]+bestaudio/best[height<={self.quality}]/best'
+                opts['merge_output_format'] = 'mp4'
             else:
                 opts['format'] = self.quality
 
@@ -169,6 +175,10 @@ class YouTubeDownloader:
             'no_warnings': True,
             'extract_flat': False,
             'skip_download': True,
+            'format': None,  # Don't select a format - we just want metadata
+            'ignore_no_formats_error': True,  # Don't fail if format selection fails
+            # Enable remote JS challenge solver to handle YouTube's "n" parameter challenge
+            'remote_components': ['ejs:github'],
         }
 
         # Try to add browser cookies
@@ -285,7 +295,9 @@ class YouTubeDownloader:
             await asyncio.to_thread(_download)
 
             # Find the actual downloaded file (in case extension differs)
-            pattern: str = f"{base_filename}.*"
+            # Use glob.escape to handle special characters like [] in filenames
+            escaped_filename: str = glob.escape(base_filename)
+            pattern: str = f"{escaped_filename}.*"
             downloaded_files: list[Path] = list(output_dir.glob(pattern=pattern))
 
             if not downloaded_files:
@@ -331,6 +343,8 @@ class YouTubeDownloader:
             'quiet': False,
             'extract_flat': True,
             'skip_download': True,
+            # Enable remote JS challenge solver to handle YouTube's "n" parameter challenge
+            'remote_components': ['ejs:github'],
         }
 
         # Try to add browser cookies
@@ -621,10 +635,3 @@ class CachedYouTubeDownloader(YouTubeDownloader):
 # if __name__ == "__main__":
 #     # Run one of the examples
 #     asyncio.run(main=basic_download_example())
-
-
-
-
-
-
-
