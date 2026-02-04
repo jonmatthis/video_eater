@@ -1,10 +1,11 @@
-# output_templates.py (Updated YouTubeDescriptionFormatter)
+# output_templates.py (Updated with transcript formatters)
 from typing import Protocol
 
 from jinja2 import Template
 
 from video_eater.core.ai_processors.ai_prompt_models import PromptModel, FullVideoAnalysis
 from video_eater.core.config_models import VideoProject, SourceType
+from video_eater.core.transcribe_audio.transcript_models import VideoTranscript
 
 
 def format_youtube_timestamp(seconds: float) -> str:
@@ -20,6 +21,25 @@ def format_youtube_timestamp(seconds: float) -> str:
         return f"{minutes}m{secs}s"
     else:
         return f"{secs}s"
+
+
+def format_timestamp_hhmmss(seconds: float) -> str:
+    """Convert seconds to HH:MM:SS format."""
+    total_seconds = int(seconds)
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    secs = total_seconds % 60
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+def format_timestamp_srt(seconds: float) -> str:
+    """Convert seconds to SRT timestamp format (HH:MM:SS,mmm)."""
+    total_seconds = int(seconds)
+    milliseconds = int((seconds - total_seconds) * 1000)
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    secs = total_seconds % 60
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{milliseconds:03d}"
 
 
 def create_youtube_timestamp_link(video_id: str, seconds: float) -> str:
@@ -50,6 +70,7 @@ def generate_source_header(project: VideoProject) -> str:
 
     header += "-" * 50 + "\n\n"
     return header
+
 
 class OutputFormatter(Protocol):
     """Protocol for output formatters."""
@@ -118,7 +139,7 @@ class YouTubeDescriptionFormatter:
 
         return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
-    def format(self, analysis: FullVideoAnalysis, project:VideoProject, max_length: int = 5000) -> str:
+    def format(self, analysis: FullVideoAnalysis, project: VideoProject, max_length: int = 5000) -> str:
         """
         Format the analysis with sophisticated length trimming.
 
@@ -302,9 +323,9 @@ class MarkdownReportFormatter:
     """Format analysis as detailed markdown report."""
 
     def format(self, analysis: FullVideoAnalysis, project: VideoProject) -> str:
-
         return analysis.to_markdown(disclaimer_text=AI_DISCLAIMER_AND_SOURCE_CODE,
                                     header=generate_source_header(project))
+
 
 class JsonFormatter:
     """Format analysis as JSON for programmatic use."""
@@ -322,7 +343,167 @@ class SimpleTextFormatter:
 
     template = Template("""{{ analysis.summary }}""")
 
-    def format(self, analysis: FullVideoAnalysis,project: VideoProject)-> str:
+    def format(self, analysis: FullVideoAnalysis, project: VideoProject) -> str:
         header = generate_source_header(project)
-        out_str =  self.template.render(analysis=analysis)
+        out_str = self.template.render(analysis=analysis)
         return header + out_str
+
+
+# =============================================================================
+# TRANSCRIPT FORMATTERS
+# =============================================================================
+
+
+class PlainTextTranscriptFormatter:
+    """Format combined transcripts as plain text."""
+
+    def format(self, transcripts: list[VideoTranscript], project: VideoProject) -> str:
+        """
+        Combine all transcript chunks into a single plain text file.
+
+        Args:
+            transcripts: List of VideoTranscript objects (one per chunk)
+            project: The VideoProject for metadata
+
+        Returns:
+            Plain text string of the full transcript
+        """
+        lines: list[str] = []
+
+        # Header
+        lines.append(f"TRANSCRIPT: {project.video_path.stem}")
+        lines.append("=" * 60)
+        if project.source_url:
+            lines.append(f"Source: {project.source_url}")
+        lines.append("")
+        lines.append("")
+
+        # Sort transcripts by start time
+        sorted_transcripts = sorted(transcripts, key=lambda t: t.start_time)
+
+        # Combine all raw transcript text
+        for transcript in sorted_transcripts:
+            lines.append(transcript.full_transcript_raw.strip())
+            lines.append("")
+
+        return "\n".join(lines)
+
+
+class SrtTranscriptFormatter:
+    """Format combined transcripts as SRT subtitle file."""
+
+    def format(self, transcripts: list[VideoTranscript], project: VideoProject) -> str:
+        """
+        Combine all transcript chunks into a single SRT file.
+
+        Args:
+            transcripts: List of VideoTranscript objects (one per chunk)
+            project: The VideoProject for metadata
+
+        Returns:
+            SRT formatted string
+        """
+        # Sort transcripts by start time
+        sorted_transcripts = sorted(transcripts, key=lambda t: t.start_time)
+
+        # Collect all segments from all transcripts
+        all_segments: list[tuple[float, float, str]] = []
+        for transcript in sorted_transcripts:
+            for segment in transcript.transcript_segments:
+                all_segments.append((segment.start, segment.end, segment.text))
+
+        # Sort by start time (should already be sorted, but ensure it)
+        all_segments.sort(key=lambda x: x[0])
+
+        # Build SRT output
+        srt_lines: list[str] = []
+        for idx, (start, end, text) in enumerate(all_segments, start=1):
+            start_ts = format_timestamp_srt(start)
+            end_ts = format_timestamp_srt(end)
+            srt_lines.append(str(idx))
+            srt_lines.append(f"{start_ts} --> {end_ts}")
+            srt_lines.append(text.strip())
+            srt_lines.append("")
+
+        return "\n".join(srt_lines)
+
+
+class MarkdownTranscriptFormatter:
+    """Format combined transcripts as Markdown with timestamps and headings."""
+
+    def format(self, transcripts: list[VideoTranscript], project: VideoProject) -> str:
+        """
+        Combine all transcript chunks into a Markdown file with timestamps.
+
+        Args:
+            transcripts: List of VideoTranscript objects (one per chunk)
+            project: The VideoProject for metadata
+
+        Returns:
+            Markdown formatted string with timestamps and structure
+        """
+        lines: list[str] = []
+
+        # Header
+        lines.append(f"# Transcript: {project.video_path.stem}")
+        lines.append("")
+
+        # Source info
+        lines.append("## Source Information")
+        lines.append("")
+        if project.source_type == SourceType.FILE:
+            lines.append(f"- **Source Type:** Local File")
+            lines.append(f"- **File Path:** `{project.video_path}`")
+        elif project.source_type == SourceType.YOUTUBE:
+            lines.append(f"- **Source Type:** YouTube Video")
+            lines.append(f"- **URL:** {project.source_url}")
+            if project.video_id:
+                lines.append(f"- **Video ID:** `{project.video_id}`")
+        elif project.source_type == SourceType.PLAYLIST:
+            lines.append(f"- **Source Type:** YouTube Playlist Video")
+            lines.append(f"- **Playlist:** {project.playlist_name}")
+            lines.append(f"- **Video URL:** {project.source_url}")
+            if project.video_id:
+                lines.append(f"- **Video ID:** `{project.video_id}`")
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+
+        # Sort transcripts by start time
+        sorted_transcripts = sorted(transcripts, key=lambda t: t.start_time)
+
+        # Calculate total duration
+        if sorted_transcripts:
+            total_duration = sorted_transcripts[-1].end_time
+            lines.append(f"**Total Duration:** {format_timestamp_hhmmss(total_duration)}")
+            lines.append("")
+            lines.append("---")
+            lines.append("")
+
+        # Full transcript with timestamps
+        lines.append("## Full Transcript")
+        lines.append("")
+
+        chunk_number = 0
+        for transcript in sorted_transcripts:
+            chunk_number += 1
+            chunk_start = format_timestamp_hhmmss(transcript.start_time)
+            chunk_end = format_timestamp_hhmmss(transcript.end_time)
+
+            # Chunk heading
+            lines.append(f"### Chunk {chunk_number} [{chunk_start} - {chunk_end}]")
+            lines.append("")
+
+            # Individual segments with timestamps
+            for segment in transcript.transcript_segments:
+                timestamp = format_timestamp_hhmmss(segment.start)
+
+                # Format with timestamp prefix
+                # Use blockquote style for the timestamp to make it visually distinct
+                lines.append(f"**[{timestamp}]** {segment.text.strip()}")
+                lines.append("")
+
+            lines.append("---")
+            lines.append("")
+
+        return "\n".join(lines)

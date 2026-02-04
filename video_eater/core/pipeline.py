@@ -1,4 +1,5 @@
 # pipeline.py
+from pathlib import Path
 from typing import Optional
 
 import yaml
@@ -6,24 +7,31 @@ from pydantic import BaseModel
 
 from video_eater.core.handle_video.audio_extractor import AudioExtractor
 from video_eater.core.config_models import VideoProject, ProcessingStats, ProcessingConfig, TranscriptionProvider
-from video_eater.core.output_templates import YouTubeDescriptionFormatter, MarkdownReportFormatter, JsonFormatter, \
-    SimpleTextFormatter
+from video_eater.core.output_templates import (
+    YouTubeDescriptionFormatter,
+    MarkdownReportFormatter,
+    JsonFormatter,
+    SimpleTextFormatter,
+    PlainTextTranscriptFormatter,
+    SrtTranscriptFormatter,
+    MarkdownTranscriptFormatter,
+)
 from video_eater.core.transcribe_audio.transcribe_audio_chunks import transcribe_audio_chunk_folder
 from video_eater.core.ai_processors.transcript_processor import TranscriptProcessor
 from video_eater.core.ai_processors.ai_prompt_models import FullVideoAnalysis
+from video_eater.core.transcribe_audio.transcript_models import VideoTranscript
 from video_eater.logging_configuration.pipeline_logger import PipelineLogger
 
 
 class VideoProcessingPipeline:
     """Clean, maintainable video processing pipeline."""
 
-    def __init__(self,
-                 config: ProcessingConfig):
+    def __init__(self, config: ProcessingConfig):
         self.config = config
         self.pipeline_logger = PipelineLogger()
         self.stats = ProcessingStats()
 
-    async def process_video(self, project: VideoProject):
+    async def process_video(self, project: VideoProject) -> "PipelineResult":
         """Process a single video through the pipeline."""
 
         self.pipeline_logger.step(1, 3, f"Processing: {project.video_path.name}")
@@ -32,14 +40,14 @@ class VideoProcessingPipeline:
         audio_chunks = await self._extract_audio(project)
         transcripts = await self._transcribe_chunks(project)
         analysis = await self._analyze_transcripts(project, transcripts)
-        _ = await self._generate_outputs(project, analysis)
+        _ = await self._generate_outputs(project, analysis, transcripts)
         return PipelineResult(
             project=project,
             stats=self.stats,
             analysis=analysis
         )
-    
-    async def _extract_audio(self, project: VideoProject):
+
+    async def _extract_audio(self, project: VideoProject) -> list[Path]:
         """Extract audio with clean separation of concerns."""
 
         extractor = AudioExtractor(
@@ -66,7 +74,7 @@ class VideoProcessingPipeline:
 
         return chunks
 
-    async def _transcribe_chunks(self, project: VideoProject):
+    async def _transcribe_chunks(self, project: VideoProject) -> list[VideoTranscript]:
         """Transcribe audio chunks and return transcripts."""
         project.transcript_chunks_folder.mkdir(parents=True, exist_ok=True)
 
@@ -92,7 +100,11 @@ class VideoProcessingPipeline:
         self.pipeline_logger.success(f"Prepared {after_count} transcript chunks ({created} new, {cached} cached)")
         return transcripts
 
-    async def _analyze_transcripts(self, project: VideoProject, transcripts):
+    async def _analyze_transcripts(
+        self,
+        project: VideoProject,
+        transcripts: list[VideoTranscript],
+    ) -> FullVideoAnalysis:
         """Analyze transcripts into a full video analysis."""
         processor = TranscriptProcessor(
             model=self.config.analysis_model,
@@ -109,7 +121,6 @@ class VideoProcessingPipeline:
         )
         # Combine all analyses (or load from cache if already done)
         combined_file = project.output_folder / "full_video_analysis.yaml"
-
 
         if combined_file.exists():
             print(f"\n📂 Using cached full video analysis from {combined_file}")
@@ -128,38 +139,49 @@ class VideoProcessingPipeline:
                       allow_unicode=True)
         print(f"💾 Saved combined analysis to {combined_file}")
 
-
         return full_analysis
 
-    async def _generate_outputs(self, project: VideoProject, analysis: FullVideoAnalysis):
+    async def _generate_outputs(
+        self,
+        project: VideoProject,
+        analysis: FullVideoAnalysis,
+        transcripts: list[VideoTranscript],
+    ) -> list[str]:
         """Generate outputs using configurable formatters."""
 
-        # Define which formatters to use
-        formatters = {
+        output_folder = project.output_folder
+        output_folder.mkdir(parents=True, exist_ok=True)
+
+        # Analysis-based formatters
+        analysis_formatters: dict[str, YouTubeDescriptionFormatter | MarkdownReportFormatter | JsonFormatter | SimpleTextFormatter] = {
             f'{project.video_path.stem}_youtube_description.md': YouTubeDescriptionFormatter(),
             f'{project.video_path.stem}_video_analysis_report.md': MarkdownReportFormatter(),
             f'{project.video_path.stem}_video_analysis.json': JsonFormatter(),
             f'{project.video_path.stem}_video_summary.txt': SimpleTextFormatter(),
         }
 
-        output_folder = project.output_folder
-        output_folder.mkdir(parents=True, exist_ok=True)
-
-        for filename, formatter in formatters.items():
+        for filename, formatter in analysis_formatters.items():
             output_file = output_folder / filename
-            # Pass project to formatter
-            if hasattr(formatter, 'format'):
-                content = formatter.format(analysis=analysis,
-                                           project=project)
-            else:
-                raise RuntimeError(f"Formatter {formatter} missing 'format' method")
-
+            content = formatter.format(analysis=analysis, project=project)
             with open(output_file, 'w', encoding='utf-8') as f:
                 f.write(content)
             self.pipeline_logger.success(f"Generated {filename}")
 
-        return list(formatters.keys())
+        # Transcript-based formatters
+        transcript_formatters: dict[str, PlainTextTranscriptFormatter | SrtTranscriptFormatter | MarkdownTranscriptFormatter] = {
+            f'{project.video_path.stem}_transcript.txt': PlainTextTranscriptFormatter(),
+            f'{project.video_path.stem}_transcript.srt': SrtTranscriptFormatter(),
+            f'{project.video_path.stem}_transcript_w_timestamps.md': MarkdownTranscriptFormatter(),
+        }
 
+        for filename, formatter in transcript_formatters.items():
+            output_file = output_folder / filename
+            content = formatter.format(transcripts=transcripts, project=project)
+            with open(output_file, 'w', encoding='utf-8') as f:
+                f.write(content)
+            self.pipeline_logger.success(f"Generated {filename}")
+
+        return list(analysis_formatters.keys()) + list(transcript_formatters.keys())
 
 
 class PipelineResult(BaseModel):
