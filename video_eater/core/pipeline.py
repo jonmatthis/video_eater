@@ -6,7 +6,7 @@ import yaml
 from pydantic import BaseModel
 
 from video_eater.core.handle_video.audio_extractor import AudioExtractor
-from video_eater.core.config_models import VideoProject, ProcessingStats, ProcessingConfig, TranscriptionProvider
+from video_eater.core.config_models import VideoProject, ProcessingStats, ProcessingConfig
 from video_eater.core.output_templates import (
     YouTubeDescriptionFormatter,
     MarkdownReportFormatter,
@@ -80,16 +80,11 @@ class VideoProcessingPipeline:
 
         before_count = len(list(project.transcript_chunks_folder.glob("*.transcript.json")))
 
-        use_local = self.config.transcription_provider == TranscriptionProvider.LOCAL_WHISPER
-        use_aai = self.config.transcription_provider == TranscriptionProvider.ASSEMBLY_AI
-
         transcripts = await transcribe_audio_chunk_folder(
             audio_chunk_folder=str(project.audio_chunks_folder),
             transcript_chunk_folder=str(project.transcript_chunks_folder),
             file_extension=".mp3",
             re_transcribe=self.config.force_transcribe,
-            local_whisper=use_local,
-            use_assembly_ai=use_aai,
         )
 
         after_count = len(list(project.transcript_chunks_folder.glob("*.transcript.json")))

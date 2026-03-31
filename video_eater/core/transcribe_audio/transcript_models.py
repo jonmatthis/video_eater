@@ -1,7 +1,4 @@
-import re
 from pydantic import BaseModel
-from openai.types.audio import TranscriptionVerbose
-from assemblyai.transcriber import Transcript
 class TranscriptSegment(BaseModel):
     text: str
     start: float  # seconds
@@ -33,49 +30,33 @@ class VideoTranscript(BaseModel):
             return self.transcript_segments[-1].end
         return 0.0
     @classmethod
-    def from_assembly_ai_output(cls, start_time:float, transcript:Transcript):
-        # Extract full transcript text
+    def from_whisper_response(cls, transcript_data) -> 'VideoTranscript':
+        """Convert a Groq/OpenAI whisper verbose_json response to VideoTranscript."""
         full_transcript_raw = ""
         full_transcript_timestamps_srt = ""
-        # Create transcript segments from either words or segments/utterances
-        pararaphs = transcript.get_paragraphs()
         transcript_segments = []
 
-        # If we have segments/utterances, use those (they have start/end times)
-        if pararaphs:
-            for paragraph_number, paragraph in enumerate(pararaphs):
-                segment_start = (paragraph.start / 1000.0)+start_time
-                segment_end = (paragraph.end / 1000.0)+start_time
-                srt_formatted_timestamp = f"{int(segment_start // 3600):02}:{int((segment_start % 3600) // 60):02}:{int(segment_start % 60):02},{int((segment_start % 1) * 1000):03} --> {int(segment_end // 3600):02}:{int((segment_end % 3600) // 60):02}:{int(segment_end % 60):02},{int((segment_end % 1) * 1000):03}"
-                transcript_segments.append(
-                    TranscriptSegment(
-                        text=paragraph.text,
-                        start=segment_start,
-                        end=segment_end
-                    )
+        for seg_number, segment in enumerate(transcript_data.segments):
+            segment_start = segment["start"] if isinstance(segment, dict) else segment.start
+            segment_end = segment["end"] if isinstance(segment, dict) else segment.end
+            segment_text = segment["text"] if isinstance(segment, dict) else segment.text
+
+            srt_formatted_timestamp = f"{int(segment_start // 3600):02}:{int((segment_start % 3600) // 60):02}:{int(segment_start % 60):02},{int((segment_start % 1) * 1000):03} --> {int(segment_end // 3600):02}:{int((segment_end % 3600) // 60):02}:{int(segment_end % 60):02},{int((segment_end % 1) * 1000):03}"
+            transcript_segments.append(
+                TranscriptSegment(
+                    text=segment_text.strip(),
+                    start=segment_start,
+                    end=segment_end
                 )
-                full_transcript_raw += f"{paragraph.text}\n"
-                full_transcript_timestamps_srt += f"{paragraph_number}\n{srt_formatted_timestamp}\n{paragraph.text}\n\n"
+            )
+            full_transcript_raw += f"{segment_text.strip()}\n"
+            full_transcript_timestamps_srt += f"{seg_number}\n{srt_formatted_timestamp}\n{segment_text.strip()}\n\n"
 
         return cls(
             full_transcript_raw=full_transcript_raw,
             full_transcript_timestamps_srt=full_transcript_timestamps_srt,
             transcript_segments=transcript_segments,
         )
-
-    # @classmethod
-    # def from_openai_transcript(cls, start_time: float, transcript_data: TranscriptionVerbose) -> 'VideoTranscript':
-    #     return cls(
-    #         full_transcript=transcript_data.text,
-    #         transcript_segments=[
-    #             TranscriptSegment(
-    #                 text=segment.text,
-    #                 start=segment.start + start_time,  # Add chunk start time
-    #                 end=segment.end + start_time  # Add chunk start time
-    #             )
-    #             for segment in transcript_data.segments
-    #         ],
-    #     )
 
 class ProcessedTranscript(BaseModel):
     video_id: str

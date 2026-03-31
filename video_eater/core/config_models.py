@@ -6,9 +6,7 @@ from enum import Enum
 
 
 class TranscriptionProvider(str, Enum):
-    OPENAI = "openai"
-    ASSEMBLY_AI = "assembly_ai"
-    LOCAL_WHISPER = "local_whisper"
+    GROQ = "groq"
 
 class SourceType(str, Enum):
     FILE = "file"
@@ -23,9 +21,8 @@ class ProcessingConfig(BaseModel):
     chunk_overlap_seconds: int = Field(default=15, ge=0, le=60)
 
     # AI models
-    analysis_model: str = Field(default="gpt-4.1-nano", description="Model for analysis")
-    transcription_provider: TranscriptionProvider = TranscriptionProvider.ASSEMBLY_AI
-    whisper_model: Optional[str] = "large"
+    analysis_model: str = Field(default="google/gemini-2.5-flash", description="Model for analysis")
+    transcription_provider: TranscriptionProvider = TranscriptionProvider.GROQ
 
     # Concurrency
     max_concurrent_chunks: int = Field(default=50, ge=1, le=100)

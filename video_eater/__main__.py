@@ -27,7 +27,16 @@ DEFAULT_VIDEO_INPUTS = [
     #  "https://www.youtube.com/playlist?list=PLWxH2Ov17q5HDfMBJxD_cE1lowM1cr_BV", # [2025-Spring] Neural Control of Real-World Human Movement playlist
     # "https://youtube.com/live/lmwA_lgxGeo",
     # r"D:\videos\obs-recordings\2025-12-18\2025-12-18-10-41-20_mouse-eye-tracker\2025-12-18T10-41gmt-0500-1920x1080-30fps-NV12.mp4",
-    "https://www.youtube.com/watch?v=WFk2bMMKhus"  # [RAW STREAM] 2026 State of the Skelly Address (FreeMoCap Foundation Annual Update)
+    # "https://www.youtube.com/watch?v=WFk2bMMKhus"  # [RAW STREAM] 2026 State of the Skelly Address (FreeMoCap Foundation Annual Update)
+    # r"C:\Users\jonma\syncthing-folders\jon-alienware-pc-synology-nas-sync\videos\video_eater_downloads\2026-02-04-[CLEANED] 2026 State of the Skelly Address (FreeMoCap Foundation Annual Update)"
+    # "https://www.youtube.com/watch?v=kw3hYndzzac" # BOOM FreeMoCap Podcast Interview
+    # "https://www.youtube.com/watch?v=Bqt8ZC5C4h8" # VFX Futures FreeMoCap - Before & Afters Podcast
+    #  "https://www.youtube.com/watch?v=WW_WpMcbzns" # This is FreeMoCap
+    # "https://www.youtube.com/watch?v=cB6lWKBlEhE" # HMN2024 - 00 - Intro to class
+    # r"C:\Users\jonma\Videos\DW22_Mattis, Jonathan S. - June 16th 2022, 12_33_15 pm [1_ucmxydwq].mp4" #
+    # "https://www.youtube.com/playlist?list=PLWxH2Ov17q5EQlt0L5bja56tK6xT1U7ws" #[2025] FreeMoCap Livestreams
+    # "https://www.youtube.com/playlist?list=PLWxH2Ov17q5GyKgzPz9tFaqs2FiMnjrMM" # [OLD] FreeMoCap Development
+    r"D:\videos\obs-recordings\2026-03-30\2026-03-30-14-51-53\2026-03-30T14-51gmt-0400-3840x2160-30fps-NV12.mp4" #"https://www.youtube.com/watch?v=sW4YLRE5aTA" #[Raw Livestream] 2026-30-03 - FreeMoCap/SkellyCam Dev Update
 ]
 
 DEFAULT_DOWNLOAD_DIR = r"C:\Users\jonma\syncthing-folders\jon-alienware-pc-synology-nas-sync\videos\video_eater_downloads"
