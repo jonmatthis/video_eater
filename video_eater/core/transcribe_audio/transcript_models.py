@@ -18,16 +18,26 @@ class TranscriptSegment(BaseModel):
 class VideoTranscript(BaseModel):
     transcript_segments: list[TranscriptSegment]
     full_transcript_raw: str
-    full_transcript_timestamps_srt:str
+    full_transcript_timestamps_srt: str
+    chunk_offset_seconds: float = 0.0
+
     @property
     def start_time(self) -> float:
         if self.transcript_segments:
-            return self.transcript_segments[0].start
-        return 0.0
+            return self.transcript_segments[0].start + self.chunk_offset_seconds
+        return self.chunk_offset_seconds
+
     @property
     def end_time(self) -> float:
         if self.transcript_segments:
-            return self.transcript_segments[-1].end
+            return self.transcript_segments[-1].end + self.chunk_offset_seconds
+        return self.chunk_offset_seconds
+
+    @property
+    def absolute_start_time(self) -> float:
+        """Raw first segment start time (chunk-relative, no offset)."""
+        if self.transcript_segments:
+            return self.transcript_segments[0].start
         return 0.0
     @classmethod
     def from_whisper_response(cls, transcript_data) -> 'VideoTranscript':

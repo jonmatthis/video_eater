@@ -1,12 +1,21 @@
 import asyncio
 import json
 import os
+import re
 from pathlib import Path
 from typing import List, Tuple
 
 from openai import AsyncOpenAI
 
 from video_eater.core.transcribe_audio.transcript_models import VideoTranscript
+
+
+def _parse_chunk_offset(filename: str) -> float:
+    """Extract chunk start time from filename like '*_chunk_000__123.45sec*'."""
+    match = re.search(r"chunk_\d{3}__(\d+(?:\.\d+)?)sec", filename)
+    if match:
+        return float(match.group(1))
+    return 0.0
 
 
 async def transcribe_audio_chunk_folder(
@@ -76,12 +85,16 @@ async def transcribe_audio_chunk_folder(
         with open(transcript_path, 'r', encoding='utf-8') as f:
             transcript_data = json.load(f)
             try:
-                all_transcripts.append(VideoTranscript(**transcript_data))
+                transcript = VideoTranscript(**transcript_data)
+                transcript.chunk_offset_seconds = _parse_chunk_offset(transcript_path.name)
+                all_transcripts.append(transcript)
             except Exception as e:
                 print(f"  ⚠️ Failed to load cached transcript {transcript_path.name}: {e}")
 
     # Add new transcripts
-    all_transcripts.extend(new_transcripts)
+    for transcript in new_transcripts:
+        # chunk_offset_seconds is set during _transcribe_single_chunk
+        all_transcripts.append(transcript)
 
     return all_transcripts
 
@@ -120,6 +133,7 @@ async def _transcribe_single_chunk(
         )
 
     transcript = VideoTranscript.from_whisper_response(transcript_response)
+    transcript.chunk_offset_seconds = _parse_chunk_offset(chunk_path.name)
 
     # Save transcript
     transcript_output_json_path.write_text(

@@ -1,4 +1,5 @@
 # pipeline.py
+import logging
 from pathlib import Path
 from typing import Optional
 
@@ -20,7 +21,8 @@ from video_eater.core.transcribe_audio.transcribe_audio_chunks import transcribe
 from video_eater.core.ai_processors.transcript_processor import TranscriptProcessor
 from video_eater.core.ai_processors.ai_prompt_models import FullVideoAnalysis
 from video_eater.core.transcribe_audio.transcript_models import VideoTranscript
-from video_eater.logging_configuration.pipeline_logger import PipelineLogger
+
+logger = logging.getLogger(__name__)
 
 
 class VideoProcessingPipeline:
@@ -28,13 +30,12 @@ class VideoProcessingPipeline:
 
     def __init__(self, config: ProcessingConfig):
         self.config = config
-        self.pipeline_logger = PipelineLogger()
         self.stats = ProcessingStats()
 
     async def process_video(self, project: VideoProject) -> "PipelineResult":
         """Process a single video through the pipeline."""
 
-        self.pipeline_logger.step(1, 3, f"Processing: {project.video_path.name}")
+        logger.info(f"Processing: {project.video_path.name}")
 
         # Each step is now clean and focused
         audio_chunks = await self._extract_audio(project)
@@ -59,7 +60,7 @@ class VideoProcessingPipeline:
         if not self.config.force_chunk_audio:
             existing = extractor.find_existing_chunks(project.audio_chunks_folder)
             if existing:
-                self.pipeline_logger.cache_hit(f"{len(existing)} audio chunks")
+                logger.info(f"Using {len(existing)} cached audio chunks")
                 self.stats.audio_chunks_cached = len(existing)
                 return existing
 
@@ -70,7 +71,7 @@ class VideoProcessingPipeline:
         )
 
         self.stats.audio_chunks_created = len(chunks)
-        self.pipeline_logger.success(f"Created {len(chunks)} audio chunks")
+        logger.success(f"Created {len(chunks)} audio chunks")
 
         return chunks
 
@@ -92,7 +93,7 @@ class VideoProcessingPipeline:
         cached = 0 if self.config.force_transcribe else before_count
         self.stats.transcripts_created = created
         self.stats.transcripts_cached = cached
-        self.pipeline_logger.success(f"Prepared {after_count} transcript chunks ({created} new, {cached} cached)")
+        logger.success(f"Prepared {after_count} transcript chunks ({created} new, {cached} cached)")
         return transcripts
 
     async def _analyze_transcripts(
@@ -115,7 +116,7 @@ class VideoProcessingPipeline:
             chunk_analysis_output_folder=project.analysis_folder,
         )
         # Combine all analyses (or load from cache if already done)
-        combined_file = project.output_folder / "full_video_analysis.yaml"
+        combined_file = project.output_folder / f"{project.video_path.stem}_full_video_analysis.yaml"
 
         if combined_file.exists():
             print(f"\n📂 Using cached full video analysis from {combined_file}")
@@ -149,7 +150,8 @@ class VideoProcessingPipeline:
 
         # Analysis-based formatters
         analysis_formatters: dict[str, YouTubeDescriptionFormatter | MarkdownReportFormatter | JsonFormatter | SimpleTextFormatter] = {
-            f'{project.video_path.stem}_youtube_description.md': YouTubeDescriptionFormatter(),
+            f'{project.video_path.stem}_youtube_description_full.md': YouTubeDescriptionFormatter(),
+            f'{project.video_path.stem}_youtube_description_truncated.md': YouTubeDescriptionFormatter(),
             f'{project.video_path.stem}_video_analysis_report.md': MarkdownReportFormatter(),
             f'{project.video_path.stem}_video_analysis.json': JsonFormatter(),
             f'{project.video_path.stem}_video_summary.txt': SimpleTextFormatter(),
@@ -157,10 +159,15 @@ class VideoProcessingPipeline:
 
         for filename, formatter in analysis_formatters.items():
             output_file = output_folder / filename
-            content = formatter.format(analysis=analysis, project=project)
+            if 'truncated' in filename:
+                content = formatter.format(analysis=analysis, project=project, max_length=5000)
+            elif 'full' in filename:
+                content = formatter.format(analysis=analysis, project=project, max_length=99999)
+            else:
+                content = formatter.format(analysis=analysis, project=project)
             with open(output_file, 'w', encoding='utf-8') as f:
                 f.write(content)
-            self.pipeline_logger.success(f"Generated {filename}")
+            logger.success(f"Generated {filename}")
 
         # Transcript-based formatters
         transcript_formatters: dict[str, PlainTextTranscriptFormatter | SrtTranscriptFormatter | MarkdownTranscriptFormatter] = {
@@ -174,7 +181,7 @@ class VideoProcessingPipeline:
             content = formatter.format(transcripts=transcripts, project=project)
             with open(output_file, 'w', encoding='utf-8') as f:
                 f.write(content)
-            self.pipeline_logger.success(f"Generated {filename}")
+            logger.success(f"Generated {filename}")
 
         return list(analysis_formatters.keys()) + list(transcript_formatters.keys())
 

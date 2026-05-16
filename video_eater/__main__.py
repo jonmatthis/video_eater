@@ -4,11 +4,6 @@ import logging
 from pathlib import Path
 
 import yaml
-# Add to path
-import sys
-from pathlib import Path
-
-sys.path.append(str(Path(__file__).parent.resolve()))
 from video_eater.core.config_models import ProcessingConfig, VideoProject, SourceType
 from video_eater.core.handle_video.youtube_getter import YouTubeDownloader, CachedYouTubeDownloader
 from video_eater.core.pipeline import VideoProcessingPipeline
@@ -17,17 +12,10 @@ logger = logging.getLogger(__name__)
 
 # Accepts: Local files, single YouTube URLs, YouTube playlists
 DEFAULT_VIDEO_INPUTS = [
-    # "https://www.youtube.com/watch?v=A-YC6a6VTGs", #JKL AI Brief History
-    # "https://www.youtube.com/playlist?list=PLCZJ-1jWKKw4GMxu8VvIPupXmJVG0Wrt5", #JKL AI Short Course playlist
-    # r"C:\Users\jonma\syncthing-folders\jon-alienware-pc-synology-nas-sync\Sync\freemocap-stuff\freemocap-clients\ben-scholl\paper-review\New folder\BS_ferret_paper_review_video.mp4"
     # r"C:\Users\jonma\syncthing-folders\jon-alienware-pc-synology-nas-sync\videos\livestream_videos\2025-08-14-JSM-Livestream-Skellycam\2025-08-14-JSM-Livestream-Skellycam.mp4",
     # r"C:\Users\jonma\syncthing-folders\jon-alienware-pc-synology-nas-sync\videos\livestream_videos\2025-08-07-JSM-Livestream\2025-08-07-JSM-Livestream-RAW.mp4",
-    # "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
     #  "https://www.youtube.com/playlist?list=PLWxH2Ov17q5HRyRc7_HD5baSYB6kBgsTj", # [2024-Fall] Neural Control of Real-World Human Movement playlist
     #  "https://www.youtube.com/playlist?list=PLWxH2Ov17q5HDfMBJxD_cE1lowM1cr_BV", # [2025-Spring] Neural Control of Real-World Human Movement playlist
-    # "https://youtube.com/live/lmwA_lgxGeo",
-    # r"D:\videos\obs-recordings\2025-12-18\2025-12-18-10-41-20_mouse-eye-tracker\2025-12-18T10-41gmt-0500-1920x1080-30fps-NV12.mp4",
-    # "https://www.youtube.com/watch?v=WFk2bMMKhus"  # [RAW STREAM] 2026 State of the Skelly Address (FreeMoCap Foundation Annual Update)
     # r"C:\Users\jonma\syncthing-folders\jon-alienware-pc-synology-nas-sync\videos\video_eater_downloads\2026-02-04-[CLEANED] 2026 State of the Skelly Address (FreeMoCap Foundation Annual Update)"
     # "https://www.youtube.com/watch?v=kw3hYndzzac" # BOOM FreeMoCap Podcast Interview
     # "https://www.youtube.com/watch?v=Bqt8ZC5C4h8" # VFX Futures FreeMoCap - Before & Afters Podcast
@@ -36,7 +24,9 @@ DEFAULT_VIDEO_INPUTS = [
     # r"C:\Users\jonma\Videos\DW22_Mattis, Jonathan S. - June 16th 2022, 12_33_15 pm [1_ucmxydwq].mp4" #
     # "https://www.youtube.com/playlist?list=PLWxH2Ov17q5EQlt0L5bja56tK6xT1U7ws" #[2025] FreeMoCap Livestreams
     # "https://www.youtube.com/playlist?list=PLWxH2Ov17q5GyKgzPz9tFaqs2FiMnjrMM" # [OLD] FreeMoCap Development
-    r"D:\videos\obs-recordings\2026-03-30\2026-03-30-14-51-53\2026-03-30T14-51gmt-0400-3840x2160-30fps-NV12.mp4" #"https://www.youtube.com/watch?v=sW4YLRE5aTA" #[Raw Livestream] 2026-30-03 - FreeMoCap/SkellyCam Dev Update
+    # r"D:\videos\obs-recordings\2026-03-30\2026-03-30-14-51-53\2026-03-30T14-51gmt-0400-3840x2160-30fps-NV12.mp4" #"https://www.youtube.com/watch?v=sW4YLRE5aTA" #[Raw Livestream] 2026-30-03 - FreeMoCap/SkellyCam Dev Update
+    # r"D:\videos\obs-recordings\2026-03-31\2026-03-31-13-56-37\2026-03-31-freemocap-ui-dev-planning.mp4"
+    r"D:\videos\obs-recordings\2026-05-15\2026-05-15-17-38-49\2026-05-15T17-38gmt-0400-3840x2160-30fps-NV12.mp4"
 ]
 
 DEFAULT_DOWNLOAD_DIR = r"C:\Users\jonma\syncthing-folders\jon-alienware-pc-synology-nas-sync\videos\video_eater_downloads"

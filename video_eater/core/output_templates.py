@@ -406,11 +406,12 @@ class SrtTranscriptFormatter:
         # Sort transcripts by start time
         sorted_transcripts = sorted(transcripts, key=lambda t: t.start_time)
 
-        # Collect all segments from all transcripts
+        # Collect all segments from all transcripts, applying chunk offset
         all_segments: list[tuple[float, float, str]] = []
         for transcript in sorted_transcripts:
+            offset = transcript.chunk_offset_seconds
             for segment in transcript.transcript_segments:
-                all_segments.append((segment.start, segment.end, segment.text))
+                all_segments.append((segment.start + offset, segment.end + offset, segment.text))
 
         # Sort by start time (should already be sorted, but ensure it)
         all_segments.sort(key=lambda x: x[0])
@@ -487,6 +488,7 @@ class MarkdownTranscriptFormatter:
         chunk_number = 0
         for transcript in sorted_transcripts:
             chunk_number += 1
+            offset = transcript.chunk_offset_seconds
             chunk_start = format_timestamp_hhmmss(transcript.start_time)
             chunk_end = format_timestamp_hhmmss(transcript.end_time)
 
@@ -496,11 +498,11 @@ class MarkdownTranscriptFormatter:
 
             # Individual segments with timestamps
             for segment in transcript.transcript_segments:
-                timestamp = format_timestamp_hhmmss(segment.start)
+                abs_start = segment.start + offset
+                timestamp = format_timestamp_hhmmss(abs_start)
 
-                # Format with timestamp prefix
-                # Use blockquote style for the timestamp to make it visually distinct
-                lines.append(f"**[{timestamp}]** {segment.text.strip()}")
+                # Format with timestamp prefix and duration
+                lines.append(f"**[{timestamp} | {segment.dur:.1f}s]** {segment.text.strip()}")
                 lines.append("")
 
             lines.append("---")

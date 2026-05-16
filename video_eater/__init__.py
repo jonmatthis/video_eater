@@ -1,10 +1,13 @@
-# Add to path
+import logging
 import sys
 from pathlib import Path
+
 sys.path.append(str(Path(__file__).parent.resolve()))
 
-from video_eater.logging_configuration.configure_logging import configure_logging
-from video_eater.logging_configuration.log_levels import LogLevels
+from skellylogs import configure_logging, LogLevels
 
 LOG_LEVEL = LogLevels.TRACE
-configure_logging(LOG_LEVEL)
+configure_logging(level=LOG_LEVEL)
+
+logging.getLogger("openai").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)

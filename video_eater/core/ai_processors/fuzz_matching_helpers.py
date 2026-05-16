@@ -349,7 +349,8 @@ async def match_quotes_to_transcript_srt(
 
         if match_result:
             start_pos, end_pos, similarity = match_result
-            timestamp = extract_timestamp_from_srt_position(transcript_srt, start_pos)
+            chunk_relative_timestamp = extract_timestamp_from_srt_position(transcript_srt, start_pos)
+            timestamp = chunk_relative_timestamp + chunk_start_time
 
             logger.info(
                 f"Matched quote with {similarity:.1%} similarity: "
