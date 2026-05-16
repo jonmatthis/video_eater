@@ -24,6 +24,7 @@ class BaseAIProcessor:
 
     def __init__(self, model: str|None, force_refresh: bool = False, use_async: bool = True):
         self.force_refresh = force_refresh
+        self._use_async = use_async
         if use_async:
             self.text_client = AsyncOpenAI(
                 api_key=os.getenv("OPENROUTER_API_KEY"),
@@ -36,6 +37,11 @@ class BaseAIProcessor:
                 timeout=600)
 
         self.model = model
+
+    async def close(self):
+        """Close the underlying httpx connection pool to allow clean event loop shutdown."""
+        if self._use_async:
+            await self.text_client.close()
 
     async def async_make_openai_json_mode_ai_request(
             self, system_prompt: str, input_data: dict, output_model: Type[T]

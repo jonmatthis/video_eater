@@ -81,11 +81,16 @@ class VideoProcessingPipeline:
 
         before_count = len(list(project.transcript_chunks_folder.glob("*.transcript.json")))
 
+        whisper_prompt = None
+        if self.config.whisper_vocabulary:
+            whisper_prompt = "Expected terms: " + ", ".join(self.config.whisper_vocabulary)
+
         transcripts = await transcribe_audio_chunk_folder(
             audio_chunk_folder=str(project.audio_chunks_folder),
             transcript_chunk_folder=str(project.transcript_chunks_folder),
             file_extension=".mp3",
             re_transcribe=self.config.force_transcribe,
+            whisper_prompt=whisper_prompt,
         )
 
         after_count = len(list(project.transcript_chunks_folder.glob("*.transcript.json")))
@@ -108,24 +113,29 @@ class VideoProcessingPipeline:
             max_concurrent_chunks=self.config.max_concurrent_chunks,
             batch_size=self.config.batch_size,
             chunk_length_seconds=self.config.chunk_length_seconds,
-            chunk_overlap_seconds=self.config.chunk_overlap_seconds,
         )
 
         chunk_analyses = await processor.process_transcript_folder(
             transcript_folder=project.transcript_chunks_folder,
             chunk_analysis_output_folder=project.analysis_folder,
         )
+        # Wire per-chunk stats back into pipeline stats
+        self.stats.analyses_created = processor.processing_stats['chunks_processed']
+        self.stats.analyses_cached = processor.processing_stats['chunks_cached']
+
         # Combine all analyses (or load from cache if already done)
         combined_file = project.output_folder / f"{project.video_path.stem}_full_video_analysis.yaml"
 
-        if combined_file.exists():
-            print(f"\n📂 Using cached full video analysis from {combined_file}")
+        if combined_file.exists() and not self.config.force_analyze:
+            logger.info(f"Using cached full video analysis from {combined_file}")
             with open(combined_file, 'r', encoding='utf-8') as f:
                 full_analysis = FullVideoAnalysis(**yaml.safe_load(f))
+            await processor.close()
             return full_analysis
 
-        print("\n🔄 Combining all chunk analyses...")
+        logger.info("Combining all chunk analyses...")
         full_analysis = await processor.combine_analyses(chunk_analyses)
+        await processor.close()
 
         # Save combined analysis as YAML
         with open(combined_file, 'w', encoding='utf-8') as f:
@@ -133,7 +143,7 @@ class VideoProcessingPipeline:
                       default_flow_style=False,
                       sort_keys=False,
                       allow_unicode=True)
-        print(f"💾 Saved combined analysis to {combined_file}")
+        logger.success(f"Saved combined analysis to {combined_file}")
 
         return full_analysis
 
@@ -148,42 +158,41 @@ class VideoProcessingPipeline:
         output_folder = project.output_folder
         output_folder.mkdir(parents=True, exist_ok=True)
 
-        # Analysis-based formatters
-        analysis_formatters: dict[str, YouTubeDescriptionFormatter | MarkdownReportFormatter | JsonFormatter | SimpleTextFormatter] = {
-            f'{project.video_path.stem}_youtube_description_full.md': YouTubeDescriptionFormatter(),
-            f'{project.video_path.stem}_youtube_description_truncated.md': YouTubeDescriptionFormatter(),
-            f'{project.video_path.stem}_video_analysis_report.md': MarkdownReportFormatter(),
-            f'{project.video_path.stem}_video_analysis.json': JsonFormatter(),
-            f'{project.video_path.stem}_video_summary.txt': SimpleTextFormatter(),
-        }
+        stem = project.video_path.stem
+        generated = []
 
-        for filename, formatter in analysis_formatters.items():
+        # Analysis-based outputs: (filename, formatter, max_length_or_None)
+        analysis_outputs: list[tuple[str, object, int | None]] = [
+            (f'{stem}_youtube_description_full.md',      YouTubeDescriptionFormatter(), None),
+            (f'{stem}_youtube_description_truncated.md',  YouTubeDescriptionFormatter(), 5000),
+            (f'{stem}_video_analysis_report.md',          MarkdownReportFormatter(),     None),
+            (f'{stem}_video_analysis.json',               JsonFormatter(),               None),
+            (f'{stem}_video_summary.txt',                 SimpleTextFormatter(),         None),
+        ]
+        for filename, formatter, max_len in analysis_outputs:
             output_file = output_folder / filename
-            if 'truncated' in filename:
-                content = formatter.format(analysis=analysis, project=project, max_length=5000)
-            elif 'full' in filename:
-                content = formatter.format(analysis=analysis, project=project, max_length=99999)
-            else:
-                content = formatter.format(analysis=analysis, project=project)
-            with open(output_file, 'w', encoding='utf-8') as f:
-                f.write(content)
+            kwargs = dict(analysis=analysis, project=project)
+            if max_len is not None:
+                kwargs['max_length'] = max_len
+            content = formatter.format(**kwargs)
+            output_file.write_text(content, encoding='utf-8')
             logger.success(f"Generated {filename}")
+            generated.append(filename)
 
-        # Transcript-based formatters
-        transcript_formatters: dict[str, PlainTextTranscriptFormatter | SrtTranscriptFormatter | MarkdownTranscriptFormatter] = {
-            f'{project.video_path.stem}_transcript.txt': PlainTextTranscriptFormatter(),
-            f'{project.video_path.stem}_transcript.srt': SrtTranscriptFormatter(),
-            f'{project.video_path.stem}_transcript_w_timestamps.md': MarkdownTranscriptFormatter(),
-        }
-
-        for filename, formatter in transcript_formatters.items():
+        # Transcript-based outputs
+        transcript_outputs = [
+            (f'{stem}_transcript.txt',               PlainTextTranscriptFormatter()),
+            (f'{stem}_transcript.srt',               SrtTranscriptFormatter()),
+            (f'{stem}_transcript_w_timestamps.md',   MarkdownTranscriptFormatter()),
+        ]
+        for filename, formatter in transcript_outputs:
             output_file = output_folder / filename
             content = formatter.format(transcripts=transcripts, project=project)
-            with open(output_file, 'w', encoding='utf-8') as f:
-                f.write(content)
+            output_file.write_text(content, encoding='utf-8')
             logger.success(f"Generated {filename}")
+            generated.append(filename)
 
-        return list(analysis_formatters.keys()) + list(transcript_formatters.keys())
+        return generated
 
 
 class PipelineResult(BaseModel):

@@ -5,6 +5,12 @@ from pathlib import Path
 
 import yaml
 from video_eater.core.config_models import ProcessingConfig, VideoProject, SourceType
+
+WHISPER_VOCABULARY = [
+    "FreeMoCap", "SkellyCam", "SkellyForge", "SkellyTracker",
+    "RTMPose", "MediaPipe", "ChArUco", "OpenCV", "OBS",
+    "DeepSeek", "blender",
+]
 from video_eater.core.handle_video.youtube_getter import YouTubeDownloader, CachedYouTubeDownloader
 from video_eater.core.pipeline import VideoProcessingPipeline
 
@@ -26,7 +32,7 @@ DEFAULT_VIDEO_INPUTS = [
     # "https://www.youtube.com/playlist?list=PLWxH2Ov17q5GyKgzPz9tFaqs2FiMnjrMM" # [OLD] FreeMoCap Development
     # r"D:\videos\obs-recordings\2026-03-30\2026-03-30-14-51-53\2026-03-30T14-51gmt-0400-3840x2160-30fps-NV12.mp4" #"https://www.youtube.com/watch?v=sW4YLRE5aTA" #[Raw Livestream] 2026-30-03 - FreeMoCap/SkellyCam Dev Update
     # r"D:\videos\obs-recordings\2026-03-31\2026-03-31-13-56-37\2026-03-31-freemocap-ui-dev-planning.mp4"
-    r"D:\videos\obs-recordings\2026-05-15\2026-05-15-17-38-49\2026-05-15T17-38gmt-0400-3840x2160-30fps-NV12.mp4"
+    r"D:\videos\obs-recordings\2026-05-15\2026-05-15-17-38-49\2026-05-15T17-38gmt-0400-3840x2160-30fps-NV12_cleaned.mp4" # [Livestream] 2026-05-16 -  FreeMoCap v2 Update
 ]
 
 DEFAULT_DOWNLOAD_DIR = r"C:\Users\jonma\syncthing-folders\jon-alienware-pc-synology-nas-sync\videos\video_eater_downloads"
@@ -120,10 +126,10 @@ def main(inputs: tuple[str, ...] | None = None,
         if isinstance(config, ProcessingConfig):
             processing_config = config
         else:
-            config_data: dict[str, object] = yaml.safe_load(Path(config).read_text())
+            config_data: dict[str, object] = yaml.safe_load(Path(config).read_text(encoding='utf-8'))
             processing_config = ProcessingConfig(**config_data)
     else:
-        processing_config = ProcessingConfig()
+        processing_config = ProcessingConfig(whisper_vocabulary=WHISPER_VOCABULARY)
 
     if force_all:
         processing_config.force_chunk_audio = True
@@ -137,7 +143,7 @@ def main(inputs: tuple[str, ...] | None = None,
 
     # Add inputs from file if specified
     if from_file:
-        with open(file=from_file, mode='r') as f:
+        with open(file=from_file, mode='r', encoding='utf-8') as f:
             file_inputs: list[str] = [line.strip() for line in f if line.strip()]
             all_inputs.extend(file_inputs)
 
@@ -230,4 +236,16 @@ def main(inputs: tuple[str, ...] | None = None,
 
 
 if __name__ == "__main__":
-    main()  # config=ProcessingConfig(force_analyze=True))
+    try:
+        main()  # config=ProcessingConfig(force_analyze=True))
+    finally:
+        # skellylogs creates a multiprocessing.Queue with a background feeder
+        # thread. Close it explicitly so the process exits cleanly.
+        try:
+            from skellylogs import get_websocket_log_queue
+            _q = get_websocket_log_queue()
+        except (ImportError, ValueError):
+            pass  # skellylogs not in use, or queue never created
+        else:
+            _q.close()
+            _q.join_thread()

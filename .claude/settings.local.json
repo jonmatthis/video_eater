@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv sync *)",
+      "Bash(python -c \"import pydantic; print\\(pydantic.__version__\\)\")"
+    ]
+  }
+}

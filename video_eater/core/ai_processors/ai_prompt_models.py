@@ -4,28 +4,25 @@ from pydantic import BaseModel, Field
 
 import logging
 logger = logging.getLogger(__name__)
-class PromptModel(BaseModel):
-    pass
 
 
-class ChapterHeading(PromptModel):
+class ChapterHeading(BaseModel):
     chapter_start_timestamp_seconds: float = Field(
         description="Start time in seconds, this MUST MATCH the timestamp from the video transcript PRECISELY")
     title: str = Field(description="Chapter title")
     description: str = Field(description="Brief description of what happens in this chapter")
 
     def __str__(self):
-        hours = int(self.chapter_start_timestamp_seconds // 3600)
-        minutes = int((self.chapter_start_timestamp_seconds % 3600) // 60)
-        seconds = int(self.chapter_start_timestamp_seconds % 60)
+        from video_eater.core.output_templates import format_timestamp_hhmmss
+        ts = format_timestamp_hhmmss(self.chapter_start_timestamp_seconds)
 
         if self.description:
-            return f"{hours:02}:{minutes:02}:{seconds:02} - {self.title}:\n {self.description}"
+            return f"{ts} - {self.title}:\n {self.description}"
         else:
-            return f"{hours:02}:{minutes:02}:{seconds:02} - {self.title}"
+            return f"{ts} - {self.title}"
 
 
-class PullQuote(PromptModel):
+class PullQuote(BaseModel):
     quality: int = Field(
         description="Quality of this pull quote on a scale from 1 to 1000, where 1000 is the highest quality, evaluated on the basis of interestingness, uniqueness, and potential interest and relevance to the deeper themes and meaning of this video",
         ge=1, le=1000)
@@ -51,15 +48,12 @@ class PullQuoteWithTimestamp(PullQuote):
 
     @property
     def as_string_youtube_formatted_timestamp(self) -> str:
-        hours = int(self.timestamp_seconds // 3600)
-        minutes = int((self.timestamp_seconds % 3600) // 60)
-        seconds = int(self.timestamp_seconds % 60)
-
-        return f"{hours:02}:{minutes:02}:{seconds:02} - '{self.text_content}'"
+        from video_eater.core.output_templates import format_timestamp_hhmmss
+        return f"{format_timestamp_hhmmss(self.timestamp_seconds)} - '{self.text_content}'"
 
 
 
-class SubTopicOutlineItem(PromptModel):
+class SubTopicOutlineItem(BaseModel):
     subtopic: str = Field(description="Subtopic under a main topic")
     details: list[str] = Field(description="List of details or points under this subtopic")
 
@@ -68,7 +62,7 @@ class SubTopicOutlineItem(PromptModel):
         return f"- {self.subtopic}\n{details_str}"
 
 
-class TopicOutlineItem(PromptModel):
+class TopicOutlineItem(BaseModel):
     topic: str = Field(description="Main topic")
     topic_overview: str = Field(description="Brief overview of the main topic")
     subtopics: list[SubTopicOutlineItem] = Field(description="List of subtopics under this main topic")
@@ -78,7 +72,7 @@ class TopicOutlineItem(PromptModel):
         return f"### {self.topic}\n> {self.topic_overview}\n{subtopics_str}\n"
 
 
-class TranscriptSummaryPromptModel(PromptModel):
+class TranscriptSummaryPromptModel(BaseModel):
     """
     Model for generating Summaries and Outlines
 
@@ -153,7 +147,7 @@ class TopicAreaPromptModel(BaseModel):
         return f"**#{self.name.replace(' ','-')}**\n \t(#{self.category.replace(' ','-')} | #{self.subject.replace(' ','-')} | #{self.topic.replace(' ','-')} | #{self.subtopic.replace(' ','-')} | #{self.niche.replace(' ','-')}):\n\t\t {self.description}"
 
 
-class ThemesAndTakeawaysPromptModel(PromptModel):
+class ThemesAndTakeawaysPromptModel(BaseModel):
     main_themes: list[str] = Field(
         description="5-8 primary themes covered across the video transcript, listed in order of priority or emphasis"
     )
@@ -171,7 +165,7 @@ class ThemesAndTakeawaysPromptModel(PromptModel):
         return output_str
 
 
-class PullQuotesSelectionPromptModel(PromptModel):
+class PullQuotesSelectionPromptModel(BaseModel):
     pull_quotes: list[PullQuoteWithTimestamp] = Field(
         description="A list of 5-10 of the most most impactful, interesting, or otherwise notable pull quotes from the video transcript - ORDERED IN TERMS OF QUALITY WITH THE BEST QUOTE FIRST")
 
@@ -181,7 +175,7 @@ class PullQuotesSelectionPromptModel(PromptModel):
         return output_str
 
 
-class ChunkAnalysis(PromptModel):
+class ChunkAnalysis(BaseModel):
     summary: TranscriptSummaryPromptModel = Field(description="Comprehensive summary of this chunk of the video")
     main_themes: list[str] = Field(
         description="5-8 primary themes covered across the video transcript, listed in order of priority or emphasis"
@@ -195,23 +189,19 @@ class ChunkAnalysis(PromptModel):
     pull_quotes: list[PullQuote] = Field(
         description="Most impactful, interesting, or otherwise notable pull quotes from the video transcript")
 
-    def get_pull_quotes(self, normalize_quality:bool, sort_by: Literal["time","quality"]|None = "quality") -> list[PullQuote]:
-        quotes = self.pull_quotes.copy()
+    def get_pull_quotes(self, normalize_quality: bool, sort_by: Literal["time", "quality"] | None = "quality") -> list:
+        from copy import deepcopy
+        quotes = deepcopy(self.pull_quotes)
         try:
             min_quality = min(quote.quality for quote in quotes)
             max_quality = max(quote.quality for quote in quotes)
             if normalize_quality and max_quality > min_quality:
                 for quote in quotes:
                     quote.quality = int(1 + 999 * (quote.quality - min_quality) / (max_quality - min_quality))
-            if sort_by:
-                if sort_by == "quality":
-                    quotes.sort(key=lambda q: q.quality, reverse=True)
-                elif sort_by == "time":
-                    quotes.sort(key=lambda q: q.timestamp_seconds)
+            if sort_by == "quality":
+                quotes.sort(key=lambda q: q.quality, reverse=True)
         except Exception as e:
             logger.warning(f"Error normalizing or sorting pull quotes: {e}")
-            # If there's an error, just return unsorted/unmodified
-            pass
         return quotes
 
 
@@ -231,6 +221,23 @@ class ChunkAnalysis(PromptModel):
 class ChunkAnalysisWithTimestamp(ChunkAnalysis):
     starting_timestamp_string: str  # e.g. "123.45" for a chunk starting at 123.45 seconds - to match with filename
     pull_quotes: list[PullQuoteWithTimestamp]
+
+    def get_pull_quotes(self, normalize_quality: bool = False, sort_by: Literal["time", "quality"] | None = "quality") -> list[PullQuoteWithTimestamp]:
+        from copy import deepcopy
+        quotes = deepcopy(self.pull_quotes)
+        try:
+            min_quality = min(quote.quality for quote in quotes)
+            max_quality = max(quote.quality for quote in quotes)
+            if normalize_quality and max_quality > min_quality:
+                for quote in quotes:
+                    quote.quality = int(1 + 999 * (quote.quality - min_quality) / (max_quality - min_quality))
+            if sort_by == "quality":
+                quotes.sort(key=lambda q: q.quality, reverse=True)
+            elif sort_by == "time":
+                quotes.sort(key=lambda q: q.timestamp_seconds)
+        except Exception as e:
+            logger.warning(f"Error normalizing or sorting pull quotes: {e}")
+        return quotes
 
     @property
     def as_chapter_heading_with_description(self) -> str:
@@ -307,8 +314,9 @@ class FullVideoAnalysis(BaseModel):
         out_string += "## Overall Pull Quotes\n" + "\n".join(str(quote) for quote in self.pull_quotes) + "\n\n"
 
 
-        out_string += "\n".join(
-            f"\\n\\n------------------------TRANSCRIPT CHUNK ANALYSES------------------------n\n\n### Analysis for Chunk Starting at {chunk.starting_timestamp_string} seconds\n\n{str(chunk)}"
+        out_string += "\n\n------------------------TRANSCRIPT CHUNK ANALYSES------------------------\n\n"
+        out_string += "\n\n".join(
+            f"### Analysis for Chunk Starting at {chunk.starting_timestamp_string} seconds\n\n{str(chunk)}"
             for chunk in self.chunk_analyses
         )
 

@@ -1,11 +1,13 @@
 # output_templates.py (Updated with transcript formatters)
-from typing import Protocol
+import logging
 
 from jinja2 import Template
 
-from video_eater.core.ai_processors.ai_prompt_models import PromptModel, FullVideoAnalysis
+from video_eater.core.ai_processors.ai_prompt_models import FullVideoAnalysis
 from video_eater.core.config_models import VideoProject, SourceType
 from video_eater.core.transcribe_audio.transcript_models import VideoTranscript
+
+logger = logging.getLogger(__name__)
 
 
 def format_youtube_timestamp(seconds: float) -> str:
@@ -70,13 +72,6 @@ def generate_source_header(project: VideoProject) -> str:
 
     header += "-" * 50 + "\n\n"
     return header
-
-
-class OutputFormatter(Protocol):
-    """Protocol for output formatters."""
-
-    def format(self, analysis: PromptModel) -> str:
-        ...
 
 
 AI_DISCLAIMER_AND_SOURCE_CODE = ("---\n"
@@ -169,23 +164,23 @@ class YouTubeDescriptionFormatter:
             rendered_length = len(rendered_string)
 
             if rendered_length <= max_length:
-                print(f"Final formatted string length: {rendered_length} characters")
+                logger.debug(f"YouTube description length: {rendered_length} chars")
                 break
 
-            print(f"Trimming stage {trimming_stage}: Current length {rendered_length}, target {max_length}")
+            logger.debug(f"Trimming stage {trimming_stage}: length {rendered_length}, target {max_length}")
 
             # Stage 1: Trim themes, topics, takeaways using the model's trim method
             if self._can_trim_analysis_lists(analysis=analysis):
                 trimmed = analysis.trim()
                 if trimmed:
-                    print(f"  Trimmed analysis lists (themes/topics/takeaways)")
+                    logger.debug("Trimmed analysis lists (themes/topics/takeaways)")
                 else:
-                    print(f"  Could not trim analysis lists further")
+                    logger.debug("Could not trim analysis lists further")
 
             # Stage 2: Reduce pull quotes from 20 to 10
             elif max_pull_quotes > 10:
                 max_pull_quotes = 10
-                print(f"  Reduced pull quotes to {max_pull_quotes}")
+                logger.debug(f"Reduced pull quotes to {max_pull_quotes}")
 
             # Stage 3: Start removing chapter descriptions from the end
             elif any(include_chapter_descriptions[i] for i in visible_chapter_indices):
@@ -193,34 +188,34 @@ class YouTubeDescriptionFormatter:
                 for i in reversed(visible_chapter_indices):
                     if include_chapter_descriptions[i]:
                         include_chapter_descriptions[i] = False
-                        print(f"  Removed description for chapter {i}")
+                        logger.debug(f"Removed description for chapter {i}")
                         break
 
             # Stage 4: Reduce pull quotes from 10 to 3
             elif max_pull_quotes > 3:
                 max_pull_quotes = 3
-                print(f"  Reduced pull quotes to {max_pull_quotes}")
+                logger.debug(f"Reduced pull quotes to {max_pull_quotes}")
 
             # Stage 5: Start removing chapters using the specific pattern
             elif len(visible_chapter_indices) > 1:
                 visible_chapter_indices = self._remove_chapter_by_pattern(
                     visible_chapter_indices=visible_chapter_indices)
-                print(f"  Removed chapter, now showing {len(visible_chapter_indices)} chapters")
+                logger.debug(f"Removed chapter, now showing {len(visible_chapter_indices)} chapters")
 
             # Stage 6: Further reduce pull quotes if needed
             elif max_pull_quotes > 0:
                 max_pull_quotes = max(0, max_pull_quotes - 1)
-                print(f"  Reduced pull quotes to {max_pull_quotes}")
+                logger.debug(f"Reduced pull quotes to {max_pull_quotes}")
 
             # Final stage: Everything has been trimmed
             else:
-                print(f"WARNING: Unable to format within {max_length} characters after all trimming attempts")
+                logger.warning(f"Unable to format within {max_length} characters after all trimming attempts")
                 break
 
             trimming_stage += 1
 
         # Fallback if we hit max stages
-        print(f"WARNING: Hit maximum trimming stages. Returning at length {len(rendered_string)} characters")
+        logger.warning(f"Hit maximum trimming stages. Returning at length {len(rendered_string)} characters")
         title_header = f"# [Abridged] {project.title}\n\n"
         title_header += generate_source_header(project)
         return title_header + "\n\n" + rendered_string
@@ -254,10 +249,15 @@ class YouTubeDescriptionFormatter:
                 elif i % 2 == 0:
                     new_indices.append(idx)
 
-            # If we didn't remove anything with the above logic, remove from middle
-            if len(new_indices) == len(visible_chapter_indices) and len(visible_chapter_indices) > 2:
-                mid = len(visible_chapter_indices) // 2
-                visible_chapter_indices.pop(mid)
+            # If we couldn't remove by pattern (e.g. only 2 remain), pop second-to-last
+            if len(new_indices) == len(visible_chapter_indices):
+                if len(visible_chapter_indices) > 2:
+                    mid = len(visible_chapter_indices) // 2
+                    visible_chapter_indices.pop(mid)
+                elif len(visible_chapter_indices) == 2:
+                    visible_chapter_indices.pop(-2)
+                else:
+                    visible_chapter_indices.pop()
             else:
                 visible_chapter_indices = new_indices
 

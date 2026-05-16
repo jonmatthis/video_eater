@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import re
 from pathlib import Path
@@ -8,6 +9,8 @@ from typing import List, Tuple
 from openai import AsyncOpenAI
 
 from video_eater.core.transcribe_audio.transcript_models import VideoTranscript
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_chunk_offset(filename: str) -> float:
@@ -23,6 +26,7 @@ async def transcribe_audio_chunk_folder(
         transcript_chunk_folder: str,
         file_extension: str = ".mp3",
         re_transcribe: bool = False,
+        whisper_prompt: str | None = None,
 ) -> List[VideoTranscript]:
     """
     Transcribe all audio chunks in a folder using Groq whisper.
@@ -44,7 +48,7 @@ async def transcribe_audio_chunk_folder(
     audio_chunks = sorted(list(chunk_folder_path.glob(f"*{file_extension}")))
 
     if not audio_chunks:
-        print(f"⚠️ No audio files found in {audio_chunk_folder}")
+        logger.warning(f"No audio files found in {audio_chunk_folder}")
         return []
 
     # Determine which chunks need transcription
@@ -56,25 +60,32 @@ async def transcribe_audio_chunk_folder(
         transcript_path = transcript_folder / transcript_filename
 
         if transcript_path.exists() and not re_transcribe:
-            print(f"  ✓ Transcript exists: {chunk_path.name}")
+            logger.debug(f"Transcript exists: {chunk_path.name}")
             existing_transcripts.append(transcript_path)
         else:
             chunks_to_transcribe.append((chunk_path, transcript_path))
 
-    print(f"\n📊 Transcription Summary:")
-    print(f"   • Total audio chunks: {len(audio_chunks)}")
-    print(f"   • Existing transcripts: {len(existing_transcripts)}")
-    print(f"   • Need transcription: {len(chunks_to_transcribe)}")
+    logger.info(f"Transcription Summary: {len(audio_chunks)} total, {len(existing_transcripts)} cached, {len(chunks_to_transcribe)} to transcribe")
 
     # Transcribe missing chunks
     if chunks_to_transcribe:
-        print(f"\n🎙️ Transcribing {len(chunks_to_transcribe)} audio chunks...")
-        new_transcripts = await transcribe_audio_chunks(
-            chunk_paths=chunks_to_transcribe,
-            reprocess_all=re_transcribe,
+        logger.info(f"Transcribing {len(chunks_to_transcribe)} audio chunks...")
+        client = AsyncOpenAI(
+            api_key=os.getenv("GROQ_API_KEY"),
+            base_url="https://api.groq.com/openai/v1",
+            timeout=600,
         )
+        try:
+            new_transcripts = await transcribe_audio_chunks(
+                chunk_paths=chunks_to_transcribe,
+                reprocess_all=re_transcribe,
+                client=client,
+                whisper_prompt=whisper_prompt,
+            )
+        finally:
+            await client.close()
     else:
-        print(f"   ℹ️ All chunks already transcribed")
+        logger.info("All chunks already transcribed")
         new_transcripts = []
 
     # Load all transcripts (existing + new)
@@ -89,7 +100,7 @@ async def transcribe_audio_chunk_folder(
                 transcript.chunk_offset_seconds = _parse_chunk_offset(transcript_path.name)
                 all_transcripts.append(transcript)
             except Exception as e:
-                print(f"  ⚠️ Failed to load cached transcript {transcript_path.name}: {e}")
+                logger.warning(f"Failed to load cached transcript {transcript_path.name}: {e}")
 
     # Add new transcripts
     for transcript in new_transcripts:
@@ -103,7 +114,9 @@ async def _transcribe_single_chunk(
         chunk_path: Path,
         transcript_output_json_path: Path,
         chunk_index: int,
-        total_chunks: int) -> Tuple[VideoTranscript, str]:
+        total_chunks: int,
+        client: AsyncOpenAI,
+        whisper_prompt: str | None = None) -> Tuple[VideoTranscript, str]:
     """
     Transcribe a single audio chunk using Groq whisper.
 
@@ -112,25 +125,24 @@ async def _transcribe_single_chunk(
         transcript_output_json_path: Path to save transcript JSON
         chunk_index: Index of current chunk (for progress display)
         total_chunks: Total number of chunks (for progress display)
+        client: Shared AsyncOpenAI client (Groq)
+        whisper_prompt: Optional prompt to guide vocabulary/transcription
 
     Returns:
         Tuple of (transcript, path_to_saved_json)
     """
-    print(f"  [{chunk_index}/{total_chunks}] Transcribing: {chunk_path.name}")
-
-    client = AsyncOpenAI(
-        api_key=os.getenv("GROQ_API_KEY"),
-        base_url="https://api.groq.com/openai/v1",
-        timeout=600,
-    )
+    logger.debug(f"[{chunk_index}/{total_chunks}] Transcribing: {chunk_path.name}")
 
     with open(chunk_path, "rb") as audio_file:
-        transcript_response = await client.audio.transcriptions.create(
+        kwargs = dict(
             file=audio_file,
             model="whisper-large-v3-turbo",
             response_format="verbose_json",
             timestamp_granularities=["segment"],
         )
+        if whisper_prompt:
+            kwargs["prompt"] = whisper_prompt
+        transcript_response = await client.audio.transcriptions.create(**kwargs)
 
     transcript = VideoTranscript.from_whisper_response(transcript_response)
     transcript.chunk_offset_seconds = _parse_chunk_offset(chunk_path.name)
@@ -149,7 +161,9 @@ async def _transcribe_single_chunk(
 async def transcribe_audio_chunks(
         chunk_paths: List[Tuple[Path, Path]],
         reprocess_all: bool = False,
-        max_concurrent: int = 50) -> List[VideoTranscript]:
+        max_concurrent: int = 50,
+        client: AsyncOpenAI | None = None,
+        whisper_prompt: str | None = None) -> List[VideoTranscript]:
     """
     Transcribe multiple audio chunks with concurrency control.
 
@@ -177,7 +191,9 @@ async def transcribe_audio_chunks(
                 chunk_path=audio_path,
                 transcript_output_json_path=transcript_path,
                 chunk_index=index,
-                total_chunks=len(chunk_paths)
+                total_chunks=len(chunk_paths),
+                client=client,
+                whisper_prompt=whisper_prompt,
             )
 
     # Create tasks for all chunks
@@ -192,7 +208,7 @@ async def transcribe_audio_chunks(
         tasks.append(task)
 
     # Wait for all tasks to complete
-    print(f"\n⚡ Processing with max {max_concurrent} concurrent transcriptions...")
+    logger.info(f"Processing with max {max_concurrent} concurrent transcriptions...")
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     # Process results
@@ -208,12 +224,11 @@ async def transcribe_audio_chunks(
 
     # Report any errors
     if errors:
-        print(f"\n⚠️ Transcription errors occurred:")
         for filename, error in errors:
-            print(f"   • {filename}: {error}")
-        raise RuntimeError(f"\n⚠️ Transcription errors occurred:")
+            logger.error(f"Transcription error: {filename}: {error}")
+        raise RuntimeError(f"Transcription errors occurred: {len(errors)} chunks failed")
 
-    print(f"\n✅ Successfully transcribed {len(transcripts)} chunks")
+    logger.success(f"Successfully transcribed {len(transcripts)} chunks")
 
     return transcripts
 

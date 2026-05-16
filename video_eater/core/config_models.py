@@ -1,7 +1,8 @@
 # config_models.py
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import ValidationInfo
 from pathlib import Path
-from typing import Optional, Literal
+from typing import Optional
 from enum import Enum
 
 
@@ -32,11 +33,12 @@ class ProcessingConfig(BaseModel):
     force_chunk_audio: bool = False
     force_transcribe: bool = False
     force_analyze: bool = False
+    whisper_vocabulary: list[str] = Field(default_factory=list, description="Domain terms fed into Whisper prompt for better transcription accuracy")
 
-    @validator('chunk_overlap_seconds')
-    def validate_overlap(cls, v, values):
-        if 'chunk_length_seconds' in values:
-            if v >= values['chunk_length_seconds']:
+    @field_validator('chunk_overlap_seconds')
+    def validate_overlap(cls, v, info: ValidationInfo):
+        if 'chunk_length_seconds' in info.data:
+            if v >= info.data['chunk_length_seconds']:
                 raise ValueError("Overlap must be less than chunk length")
         return v
 
@@ -93,12 +95,11 @@ class VideoProject(BaseModel):
 
     @property
     def output_folder(self) -> Path:
+        root = self.output_root or self.video_path.parent.parent
         if self.source_type == SourceType.PLAYLIST and self.playlist_name:
-            out_path = self.video_path.parent.parent /'video_eater_outputs'/ f"{self.playlist_name}_outputs" / f"{self.video_path.stem}_outputs"
+            return root / 'video_eater_outputs' / f"{self.playlist_name}_outputs" / f"{self.video_path.stem}_outputs"
         else:
-            out_path = self.video_path.parent.parent /'video_eater_outputs'/ f"{self.video_path.stem}_outputs"
-        out_path.mkdir(parents=True, exist_ok=True)
-        return out_path
+            return root / 'video_eater_outputs' / f"{self.video_path.stem}_outputs"
 
     def to_dict(self) -> dict[str,object]:
         return {
@@ -113,6 +114,8 @@ class VideoProject(BaseModel):
             "analysis_folder": str(self.analysis_folder),
             "output_folder": str(self.output_folder),
         }
+
+    output_root: Optional[Path] = None
 
     class Config:
         arbitrary_types_allowed = True

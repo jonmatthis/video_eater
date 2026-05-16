@@ -1,6 +1,5 @@
 import logging
 import re
-from copy import deepcopy
 from typing import Tuple, Optional, List
 
 from rapidfuzz import fuzz, process

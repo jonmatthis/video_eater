@@ -1,8 +1,4 @@
 import logging
-import sys
-from pathlib import Path
-
-sys.path.append(str(Path(__file__).parent.resolve()))
 
 from skellylogs import configure_logging, LogLevels
 

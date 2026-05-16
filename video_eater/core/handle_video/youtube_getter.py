@@ -428,7 +428,7 @@ class CachedYouTubeDownloader(YouTubeDownloader):
         cache: dict[str, Path] = {}
 
         if cache_file.exists():
-            for line in cache_file.read_text().splitlines():
+            for line in cache_file.read_text(encoding='utf-8').splitlines():
                 if '|' in line:
                     url, path = line.split('|', 1)
                     cached_path: Path = Path(path)
@@ -441,7 +441,7 @@ class CachedYouTubeDownloader(YouTubeDownloader):
         """Save cache index to disk."""
         cache_file: Path = self.cache_dir / 'download_index.txt'
         lines: list[str] = [f"{url}|{path}" for url, path in self._cache_index.items()]
-        cache_file.write_text(data='\n'.join(lines))
+        cache_file.write_text(data='\n'.join(lines), encoding='utf-8')
 
     async def download(self,
                        url: str,

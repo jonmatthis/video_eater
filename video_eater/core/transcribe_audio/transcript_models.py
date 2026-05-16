@@ -51,7 +51,8 @@ class VideoTranscript(BaseModel):
             segment_end = segment["end"] if isinstance(segment, dict) else segment.end
             segment_text = segment["text"] if isinstance(segment, dict) else segment.text
 
-            srt_formatted_timestamp = f"{int(segment_start // 3600):02}:{int((segment_start % 3600) // 60):02}:{int(segment_start % 60):02},{int((segment_start % 1) * 1000):03} --> {int(segment_end // 3600):02}:{int((segment_end % 3600) // 60):02}:{int(segment_end % 60):02},{int((segment_end % 1) * 1000):03}"
+            from video_eater.core.output_templates import format_timestamp_srt
+            srt_formatted_timestamp = f"{format_timestamp_srt(segment_start)} --> {format_timestamp_srt(segment_end)}"
             transcript_segments.append(
                 TranscriptSegment(
                     text=segment_text.strip(),
@@ -68,12 +69,3 @@ class VideoTranscript(BaseModel):
             transcript_segments=transcript_segments,
         )
 
-class ProcessedTranscript(BaseModel):
-    video_id: str
-    title: str
-    transcript_chunks: list[TranscriptSegment]
-    full_transcript: str = ""
-
-    @property
-    def key_name(self) -> str:
-        return f"{self.title}_{self.video_id}"
