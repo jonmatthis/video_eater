@@ -1,5 +1,6 @@
 # output_templates.py (Updated with transcript formatters)
 import logging
+import time
 
 from jinja2 import Template
 
@@ -148,13 +149,12 @@ class YouTubeDescriptionFormatter:
         # Initialize with most verbose settings
         include_chapter_descriptions = [True] * len(analysis.chunk_analyses)
         visible_chapter_indices = list(range(len(analysis.chunk_analyses)))
-        max_pull_quotes = min(20, len(analysis.pull_quotes))  # Start with max 20
+        max_pull_quotes = min(20, len(analysis.pull_quotes))
 
-        # Track what we've tried to trim
+        t0 = time.perf_counter()
         trimming_stage = 0
-        max_trimming_stages = 1000  # Safety to prevent infinite loops
         rendered_string = ""
-        while trimming_stage < max_trimming_stages:
+        while trimming_stage < 1000:
             rendered_string = self._render_with_settings(
                 analysis=analysis,
                 include_chapter_descriptions=include_chapter_descriptions,
@@ -164,58 +164,47 @@ class YouTubeDescriptionFormatter:
             rendered_length = len(rendered_string)
 
             if rendered_length <= max_length:
-                logger.debug(f"YouTube description length: {rendered_length} chars")
+                logger.info(f"YouTube description: {rendered_length} chars after {trimming_stage} stages ({time.perf_counter() - t0:.1f}s)")
                 break
 
-            logger.debug(f"Trimming stage {trimming_stage}: length {rendered_length}, target {max_length}")
+            if trimming_stage % 10 == 0:
+                logger.info(f"Trimming stage {trimming_stage}: {rendered_length} chars (target {max_length}, {time.perf_counter() - t0:.1f}s elapsed)")
 
             # Stage 1: Trim themes, topics, takeaways using the model's trim method
             if self._can_trim_analysis_lists(analysis=analysis):
-                trimmed = analysis.trim()
-                if trimmed:
-                    logger.debug("Trimmed analysis lists (themes/topics/takeaways)")
-                else:
-                    logger.debug("Could not trim analysis lists further")
+                analysis.trim()
 
             # Stage 2: Reduce pull quotes from 20 to 10
             elif max_pull_quotes > 10:
                 max_pull_quotes = 10
-                logger.debug(f"Reduced pull quotes to {max_pull_quotes}")
 
-            # Stage 3: Start removing chapter descriptions from the end
+            # Stage 3: Remove chapter descriptions from the end, one per stage
             elif any(include_chapter_descriptions[i] for i in visible_chapter_indices):
-                # Find the last visible chapter with description still included
                 for i in reversed(visible_chapter_indices):
                     if include_chapter_descriptions[i]:
                         include_chapter_descriptions[i] = False
-                        logger.debug(f"Removed description for chapter {i}")
                         break
 
             # Stage 4: Reduce pull quotes from 10 to 3
             elif max_pull_quotes > 3:
                 max_pull_quotes = 3
-                logger.debug(f"Reduced pull quotes to {max_pull_quotes}")
 
-            # Stage 5: Start removing chapters using the specific pattern
+            # Stage 5: Remove chapters using pattern
             elif len(visible_chapter_indices) > 1:
-                visible_chapter_indices = self._remove_chapter_by_pattern(
-                    visible_chapter_indices=visible_chapter_indices)
-                logger.debug(f"Removed chapter, now showing {len(visible_chapter_indices)} chapters")
+                visible_chapter_indices = self._remove_chapter_by_pattern(visible_chapter_indices)
 
-            # Stage 6: Further reduce pull quotes if needed
+            # Stage 6: Further reduce pull quotes
             elif max_pull_quotes > 0:
                 max_pull_quotes = max(0, max_pull_quotes - 1)
-                logger.debug(f"Reduced pull quotes to {max_pull_quotes}")
 
-            # Final stage: Everything has been trimmed
             else:
-                logger.warning(f"Unable to format within {max_length} characters after all trimming attempts")
+                logger.warning(f"Unable to format within {max_length} chars after {trimming_stage} stages")
                 break
 
             trimming_stage += 1
+        else:
+            logger.warning(f"Hit stage limit at length {len(rendered_string)} chars")
 
-        # Fallback if we hit max stages
-        logger.warning(f"Hit maximum trimming stages. Returning at length {len(rendered_string)} characters")
         title_header = f"# [Abridged] {project.title}\n\n"
         title_header += generate_source_header(project)
         return title_header + "\n\n" + rendered_string

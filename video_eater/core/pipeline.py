@@ -1,4 +1,5 @@
 # pipeline.py
+import json
 import logging
 from pathlib import Path
 from typing import Optional
@@ -123,28 +124,9 @@ class VideoProcessingPipeline:
         self.stats.analyses_created = processor.processing_stats['chunks_processed']
         self.stats.analyses_cached = processor.processing_stats['chunks_cached']
 
-        # Combine all analyses (or load from cache if already done)
-        combined_file = project.output_folder / f"{project.video_path.stem}_full_video_analysis.yaml"
-
-        if combined_file.exists() and not self.config.force_analyze:
-            logger.info(f"Using cached full video analysis from {combined_file}")
-            with open(combined_file, 'r', encoding='utf-8') as f:
-                full_analysis = FullVideoAnalysis(**yaml.safe_load(f))
-            await processor.close()
-            return full_analysis
-
         logger.info("Combining all chunk analyses...")
         full_analysis = await processor.combine_analyses(chunk_analyses)
         await processor.close()
-
-        # Save combined analysis as YAML
-        with open(combined_file, 'w', encoding='utf-8') as f:
-            yaml.dump(full_analysis.model_dump(), f,
-                      default_flow_style=False,
-                      sort_keys=False,
-                      allow_unicode=True)
-        logger.success(f"Saved combined analysis to {combined_file}")
-
         return full_analysis
 
     async def _generate_outputs(

@@ -32,7 +32,7 @@ DEFAULT_VIDEO_INPUTS = [
     # "https://www.youtube.com/playlist?list=PLWxH2Ov17q5GyKgzPz9tFaqs2FiMnjrMM" # [OLD] FreeMoCap Development
     # r"D:\videos\obs-recordings\2026-03-30\2026-03-30-14-51-53\2026-03-30T14-51gmt-0400-3840x2160-30fps-NV12.mp4" #"https://www.youtube.com/watch?v=sW4YLRE5aTA" #[Raw Livestream] 2026-30-03 - FreeMoCap/SkellyCam Dev Update
     # r"D:\videos\obs-recordings\2026-03-31\2026-03-31-13-56-37\2026-03-31-freemocap-ui-dev-planning.mp4"
-    r"D:\videos\obs-recordings\2026-05-15\2026-05-15-17-38-49\2026-05-15T17-38gmt-0400-3840x2160-30fps-NV12_cleaned.mp4" # [Livestream] 2026-05-16 -  FreeMoCap v2 Update
+    # r"D:\videos\obs-recordings\2026-05-15\2026-05-15-17-38-49\2026-05-15T17-38gmt-0400-3840x2160-30fps-NV12_1_trimmedsmaller_.mp4" # [Livestream] 2026-05-16 -  FreeMoCap v2 Update
 ]
 
 DEFAULT_DOWNLOAD_DIR = r"C:\Users\jonma\syncthing-folders\jon-alienware-pc-synology-nas-sync\videos\video_eater_downloads"
