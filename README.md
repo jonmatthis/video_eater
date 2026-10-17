@@ -21,6 +21,7 @@ This is a personal tool I built for my own use. It is not polished, not well-tes
 
 - Python 3.10+
 - ffmpeg (must be in PATH)
+- Deno 2.3+ or Node.js 22+ in PATH for YouTube's JavaScript challenges (both are enabled by the downloader). Your IDE's run environment must also include the runtime in PATH.
 - API keys for whichever services you use:
   - `OPENAI_API_KEY` (required for transcription and/or analysis)
   - `ASSEMBLY_AI_API_KEY` (if using AssemblyAI transcription)
@@ -34,10 +35,14 @@ git clone <repo-url>
 cd video_eater
 
 # Install with uv
-uv pip install -e .
+uv sync
+```
 
-# Or with pip
-pip install -e .
+If YouTube downloads start failing with `n challenge solving failed`, check that
+your run environment can find Deno or Node, then update yt-dlp and its solver together:
+
+```bash
+uv add --upgrade-package yt-dlp --upgrade-package yt-dlp-ejs "yt-dlp[default]"
 ```
 
 Set environment variables (or use a `.env` file in the project root, see `sample.env` for example):
@@ -55,7 +60,7 @@ export DEEPSEEK_API_KEY="..."     # optional
 Edit the `DEFAULT_VIDEO_INPUTS` list in `__main__.py` to include your video paths or YouTube URLs (videos or playlists should both work) , then run:
 
 ```bash
-python -m video_eater
+uv run python -m video_eater
 ```
 
 ### Programmatic usage
@@ -258,4 +263,4 @@ Use the `force_*` config flags to override caching.
 - Error handling is inconsistent across the codebase
 - No automated tests
 
-gl;hf! 
+gl;hf!

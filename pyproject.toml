@@ -3,7 +3,7 @@ name = "video_eater"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "av>=15.0.0",
     "click>=8.2.1",
@@ -13,7 +13,7 @@ dependencies = [
     "pyyaml>=6.0.2",
     "rapidfuzz>=3.14.3",
     "skellylogs",
-    "yt-dlp[default]>=2026.2.4",
+    "yt-dlp[default]>=2026.8.19",
 ]
 
 [tool.uv.sources]

@@ -104,6 +104,7 @@ class YouTubeDownloader:
             'postprocessor_hooks': [self._postprocessor_hook],
             # Enable remote JS challenge solver to handle YouTube's "n" parameter challenge
             'remote_components': ['ejs:github'],
+            'js_runtimes': {'deno': {}, 'node': {}},
         }
 
         # Try to add browser cookies
@@ -179,6 +180,7 @@ class YouTubeDownloader:
             'ignore_no_formats_error': True,  # Don't fail if format selection fails
             # Enable remote JS challenge solver to handle YouTube's "n" parameter challenge
             'remote_components': ['ejs:github'],
+            'js_runtimes': {'deno': {}, 'node': {}},
         }
 
         # Try to add browser cookies
@@ -345,6 +347,7 @@ class YouTubeDownloader:
             'skip_download': True,
             # Enable remote JS challenge solver to handle YouTube's "n" parameter challenge
             'remote_components': ['ejs:github'],
+            'js_runtimes': {'deno': {}, 'node': {}},
         }
 
         # Try to add browser cookies
